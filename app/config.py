@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # База данных
-    # Пример: postgresql+asyncpg://user:pass@localhost:5432/pature
     database_url: str
 
     # JWT
