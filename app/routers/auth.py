@@ -1,3 +1,4 @@
+# app/routers/auth.py
 import datetime as dt
 from uuid import UUID
 
@@ -26,6 +27,7 @@ from ..security import (
 )
 from ..repositories.user_repository import (
     get_user_by_phone,
+    get_user_by_email,
     upsert_device,
     create_session,
     get_session_by_refresh_token,
@@ -33,6 +35,7 @@ from ..repositories.user_repository import (
 )
 from app.services.email_service import send_email_verification_code
 from app.config import get_settings
+from app.utils.validators import normalize_ru_phone, validate_password_strength
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -47,12 +50,19 @@ async def register(
     payload: EmailRegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> RegisterStartResponse:
+    # Валидация сложности пароля
+    validate_password_strength(payload.password)
+
     # Проверяет, есть ли пользователь с таким email
     stmt = select(User).where(User.email == payload.email)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
     hashed_pwd = hash_password(payload.password)
+
+    normalized_phone: str | None = None
+    if payload.phone:
+        normalized_phone = normalize_ru_phone(payload.phone)
 
     if user and user.is_email_verified:
         raise HTTPException(
@@ -64,7 +74,7 @@ async def register(
         # Создаёт нового пользователя и дефолтные записи профиля/настроек
         user = User(
             email=payload.email,
-            phone=payload.phone,
+            phone=normalized_phone,
             hashed_password=hashed_pwd,
             is_active=True,
             is_email_verified=False,
@@ -76,8 +86,10 @@ async def register(
         db.add(UserPrivacySettings(user_id=user.id))
         db.add(UserSettings(user_id=user.id))
     else:
-        # Пользователь есть, но ещё не подтвердил почту – обновляет пароль
+        # Пользователь есть, но ещё не подтвердил почту – обновляет пароль и при необходимости телефон
         user.hashed_password = hashed_pwd
+        if normalized_phone is not None:
+            user.phone = normalized_phone
 
     # Генерирует одноразовый код
     code = generate_numeric_code(6)
@@ -99,16 +111,9 @@ async def register(
 
     # Отправляет письмо
     await send_email_verification_code(payload.email, code)
-    # try:
-    #     await send_email_verification_code(payload.email, code)
-    # except Exception:
-    #     # Здесь можно добавить логирование
-    #     raise HTTPException(
-    #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    #         detail="Could not send verification email",
-    #     )
 
     return RegisterStartResponse()
+
 
 @router.post(
     "/register/confirm",
@@ -178,24 +183,58 @@ async def confirm_email(
     return SimpleDetailResponse(detail="email_verified")
 
 
+def _get_user_by_login(
+    db: AsyncSession,
+    login: str,
+) -> User:
+    """
+    Ищет пользователя по логину (e-mail или телефон).
+    Внутри хелпера не используется await, поэтому реализуется
+    как отдельная async-функция ниже.
+    """
+    raise NotImplementedError("Use async_get_user_by_login instead")
+
+
+async def async_get_user_by_login(
+    db: AsyncSession,
+    login: str,
+) -> User | None:
+    """
+    Ищет пользователя по логину:
+    - если login содержит '@', считает его e-mail;
+    - иначе считает его телефоном и нормализует под RU-формат.
+    """
+    login = login.strip()
+    if not login:
+        return None
+
+    if "@" in login:
+        return await get_user_by_email(db, login)
+
+    normalized_phone = normalize_ru_phone(login)
+    return await get_user_by_phone(db, normalized_phone)
+
+
 @router.post("/login", response_model=TokenPair)
 async def login(
     payload: UserLoginRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
-    user = await get_user_by_phone(db, payload.phone)
+    user = await async_get_user_by_login(db, payload.login)
+
     if user is None or not user.is_active or not user.hashed_password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect phone or password",
+            detail="Incorrect login or password",
         )
 
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect phone or password",
+            detail="Incorrect login or password",
         )
+
     if not user.is_email_verified:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -250,14 +289,16 @@ async def refresh_tokens(
 ) -> TokenPair:
     data = await request.json()
     refresh_token = data.get("refresh_token")
-    phone = data.get("phone")
-    if not refresh_token or not phone:
+    # Для обратной совместимости поддерживает login/email/phone
+    login = data.get("login") or data.get("email") or data.get("phone")
+
+    if not refresh_token or not login:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="phone and refresh_token are required",
+            detail="login (or email/phone) and refresh_token are required",
         )
 
-    user = await get_user_by_phone(db, phone)
+    user = await async_get_user_by_login(db, login)
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

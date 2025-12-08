@@ -16,6 +16,12 @@ from ..models import (
 from ..security import hash_refresh_token
 
 
+
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
+    stmt = select(User).where(User.email == email)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
 async def get_user_by_phone(db: AsyncSession, phone: str) -> Optional[User]:
     stmt = select(User).where(User.phone == phone)
     result = await db.execute(stmt)
