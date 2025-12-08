@@ -3,7 +3,6 @@ from email.message import EmailMessage
 import aiosmtplib
 
 from app.config import get_settings
-from app.core.logging import logger  # если у тебя свой логгер
 
 settings = get_settings()
 
@@ -27,14 +26,6 @@ async def send_email_verification_code(to_email: str, code: str) -> None:
     # tls_context.verify_mode = ssl.CERT_NONE
 
     try:
-        logger.info(
-            "Отправляет код подтверждения на %s через %s:%s (start_tls=%s, use_tls=%s)",
-            to_email,
-            settings.smtp_host,
-            settings.smtp_port,
-            settings.smtp_start_tls,
-            settings.smtp_use_tls,
-        )
         await aiosmtplib.send(
             message,
             hostname=settings.smtp_host,   # здесь может быть 127.0.0.1
@@ -45,7 +36,5 @@ async def send_email_verification_code(to_email: str, code: str) -> None:
             start_tls=settings.smtp_start_tls,
             tls_context=tls_context,
         )
-        logger.info("Письмо с кодом подтверждения успешно отправлено")
     except Exception as exc:
-        logger.exception("Не удалось отправить письмо с кодом подтверждения: %s", exc)
         raise
