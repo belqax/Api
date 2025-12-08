@@ -31,11 +31,11 @@ class Settings(BaseSettings):
 
     # SMTP для отправки писем
     smtp_host: str = "127.0.0.1"
-    smtp_port: int = 25
-    smtp_user: str = None
-    smtp_password: str = None
+    smtp_port: int = 587
+    smtp_user: str = "noreply"
+    smtp_password: str = "noreply"
     smtp_use_tls: bool = False          # True для SMTPS (465)
-    smtp_start_tls: bool | None = None  # True/False/None (по умолчанию авто)
+    smtp_start_tls: bool | None = True  # True/False/None (по умолчанию авто)
     smtp_from_email: str = "noreply@belqax.xyz"
     smtp_from_name: str = "Pature"
 
