@@ -114,6 +114,88 @@ async def register(
 
     return RegisterStartResponse()
 
+@router.post("/email/resend", response_model=SimpleDetailResponse)
+async def resend_verification_email(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> SimpleDetailResponse:
+    """
+    Повторно отправляет письмо верификации, если с последней отправки прошло ≥ 60 секунд.
+    """
+    data = await request.json()
+    email = data.get("email")
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="email is required"
+        )
+
+    # Ищем пользователя
+    stmt_user = select(User).where(User.email == email)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    if user.is_email_verified:
+        return SimpleDetailResponse(detail="email_already_verified")
+
+    now = dt.datetime.now(dt.timezone.utc)
+
+    # Ищем последнюю запись отправки письма (даже если код уже использован)
+    stmt_last = (
+        select(EmailVerificationCode)
+        .where(
+            EmailVerificationCode.user_id == user.id,
+            EmailVerificationCode.email == email,
+            EmailVerificationCode.purpose == "register",
+        )
+        .order_by(EmailVerificationCode.created_at.desc())
+        .limit(1)
+    )
+    result_last = await db.execute(stmt_last)
+    last_code = result_last.scalar_one_or_none()
+
+    # Проверяем cooldown = 60 сек
+    COOLDOWN_SECONDS = 60
+
+    if last_code:
+        elapsed = (now - last_code.created_at).total_seconds()
+        if elapsed < COOLDOWN_SECONDS:
+            remaining = int(COOLDOWN_SECONDS - elapsed)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {remaining} seconds before requesting a new code"
+            )
+
+    # Генерируем новый код
+    verification_code = generate_numeric_code(6)
+    code_hash = hash_verification_code(verification_code)
+    expires_at = now + dt.timedelta(
+        minutes=settings.email_verification_code_ttl_minutes
+    )
+
+    new_code = EmailVerificationCode(
+        user_id=user.id,
+        email=email,
+        purpose="register",
+        code_hash=code_hash,
+        expires_at=expires_at,
+        max_attempts=settings.email_verification_max_attempts,
+    )
+
+    db.add(new_code)
+    await db.commit()
+
+    # Отправка письма
+    await send_email_verification_code(email, verification_code)
+
+    return SimpleDetailResponse(detail="verification_code_resent")
 
 @router.post(
     "/register/confirm",
