@@ -13,7 +13,7 @@ PROJECT_ROOT = BASE_DIR.parent
 
 class Settings(BaseSettings):
     # Общее
-    app_name: str = "Pature API"
+    app_name: str = "Pature APIs"
     debug: bool = False
 
     # База данных
