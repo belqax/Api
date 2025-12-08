@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # SMTP для отправки писем
     smtp_host: str = "127.0.0.1"
-    smtp_port: int = 587
+    smtp_port: int = 25
     smtp_user: str = "noreply"
     smtp_password: str = "noreply"
     smtp_use_tls: bool = False          # True для SMTPS (465)
