@@ -18,7 +18,7 @@ class TokenPair(BaseModel):
 
 class UserBase(BaseModel):
     id: int
-    phone: str
+    phone: Optional[str] = None
     email: Optional[str] = None
     is_active: bool
 

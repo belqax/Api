@@ -30,7 +30,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    phone: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(32),unique=True,index=True,nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), unique=True)
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
