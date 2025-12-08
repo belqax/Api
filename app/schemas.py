@@ -76,9 +76,8 @@ class UserRegisterRequest(BaseModel):
 
 
 class UserLoginRequest(BaseModel):
-    phone: str
-    password: str | None = None
-    email: EmailStr | None = None
+    login: constr(min_length=3, max_length=255)
+    password: constr(min_length=8, max_length=128)
 
 
 class UserProfileUpdateRequest(BaseModel):
