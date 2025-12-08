@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     email_verification_max_attempts: int = 5
 
     # SMTP для отправки писем
-    smtp_host: str = "176.109.108.150"
+    smtp_host: str = "127.0.0.1"
     smtp_port: int = 587
     smtp_user: str = "noreply"
     smtp_password: str = "noreply"
