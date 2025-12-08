@@ -1,21 +1,14 @@
-from __future__ import annotations
-
+import ssl
 from email.message import EmailMessage
-import logging
-
 import aiosmtplib
 
 from app.config import get_settings
-
-logger = logging.getLogger(__name__)
+from app.core.logging import logger  # если у тебя свой логгер
 
 settings = get_settings()
 
 
 async def send_email_verification_code(to_email: str, code: str) -> None:
-    """
-    Отправляет на почту одноразовый код подтверждения регистрации.
-    """
     message = EmailMessage()
     message["Subject"] = "Pature: код подтверждения"
     message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
@@ -26,6 +19,12 @@ async def send_email_verification_code(to_email: str, code: str) -> None:
         f"Код действителен {settings.email_verification_code_ttl_minutes} минут."
     )
     message.set_content(body)
+
+    # Создаёт TLS-контекст без проверки hostname (и при желании без проверки цепочки)
+    tls_context = ssl.create_default_context()
+    tls_context.check_hostname = False
+    # При необходимости можно ещё ослабить:
+    # tls_context.verify_mode = ssl.CERT_NONE
 
     try:
         logger.info(
@@ -38,15 +37,15 @@ async def send_email_verification_code(to_email: str, code: str) -> None:
         )
         await aiosmtplib.send(
             message,
-            hostname=settings.smtp_host,
+            hostname=settings.smtp_host,   # здесь может быть 127.0.0.1
             port=settings.smtp_port,
             username=settings.smtp_user,
             password=settings.smtp_password,
             use_tls=settings.smtp_use_tls,
             start_tls=settings.smtp_start_tls,
+            tls_context=tls_context,
         )
         logger.info("Письмо с кодом подтверждения успешно отправлено")
     except Exception as exc:
         logger.exception("Не удалось отправить письмо с кодом подтверждения: %s", exc)
-        # важно: пробрасывает дальше, чтобы /auth/register вернул 500 и вы не потеряли стек
         raise
