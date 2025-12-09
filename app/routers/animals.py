@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from ..deps import get_db, get_current_user
 from ..models import User, Animal
 from ..repositories.matching_repository import create_or_update_like, detect_mutual_like_and_create_match
+from ..repositories.search_history_repository import log_user_search
 from ..schemas import (
     AnimalWithPhotos,
     AnimalCreateRequest,
@@ -94,8 +95,24 @@ async def search_animals(
         offset=offset,
         order_by=order_by,
     )
-    return [AnimalWithPhotos.model_validate(a) for a in animals]
 
+    await log_user_search(
+        db,
+        user_id=current_user.id,
+        source="animals_search",
+        filters={
+            "species": species,
+            "city": city,
+            "sex": sex,
+            "age_from_years": age_from_years,
+            "age_to_years": age_to_years,
+            "has_photos": has_photos,
+            "status": status,
+            "order_by": order_by,
+        },
+    )
+
+    return [AnimalWithPhotos.model_validate(a) for a in animals]
 
 @router.post("", response_model=AnimalWithPhotos)
 async def create_my_animal(

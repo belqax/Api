@@ -14,7 +14,7 @@ from sqlalchemy import (
     String,
     Text, func, UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import INET, UUID
+from sqlalchemy.dialects.postgresql import INET, UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -82,6 +82,12 @@ class User(Base):
         "UserMatch",
         back_populates="user2",
         foreign_keys="UserMatch.user_id2",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    search_history: Mapped[list["UserSearchHistory"]] = relationship(
+        "UserSearchHistory",
+        back_populates="user",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
@@ -227,6 +233,36 @@ class UserSession(Base):
 
     user: Mapped[User] = relationship(back_populates="sessions")
     device: Mapped[Optional[UserDevice]] = relationship(back_populates="sessions")
+
+class UserSearchHistory(Base):
+    __tablename__ = "user_search_history"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # источник: animals_search, feed и т.п.
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # JSON с фильтрами: species, city, age_from_years и т.д.
+    filters: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="search_history")
 
 
 class Animal(Base):

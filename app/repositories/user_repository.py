@@ -101,6 +101,24 @@ async def upsert_device(
     await db.refresh(device)
     return device
 
+async def update_user_avatar(
+    db: AsyncSession,
+    user: User,
+    *,
+    avatar_url: Optional[str],
+) -> User:
+    if user.profile is None:
+        profile = UserProfile(user_id=user.id)
+        db.add(profile)
+        await db.flush()
+        await db.refresh(user)
+
+    profile = user.profile
+    profile.avatar_url = avatar_url
+
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 async def create_session(
     db: AsyncSession,

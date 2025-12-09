@@ -255,6 +255,19 @@ class MatchListItem(BaseModel):
     counterpart: MatchUserSummary
     created_at: dt.datetime
 
+
+class OutgoingLikeItem(BaseModel):
+    id: int
+    animal: "AnimalWithPhotos"
+    created_at: dt.datetime
+
+
+class IncomingLikeItem(BaseModel):
+    id: int
+    from_user: "UserBase"
+    animal: "AnimalWithPhotos"
+    created_at: dt.datetime
+
 class AddressSuggestion(BaseModel):
     formatted: str
     lat: float
@@ -293,3 +306,5 @@ class AddressSearchResponse(BaseModel):
     results: List[AddressSuggestion]
 
 MatchUserSummary.model_rebuild()
+OutgoingLikeItem.model_rebuild()
+IncomingLikeItem.model_rebuild()

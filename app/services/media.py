@@ -5,6 +5,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 from typing import Final, Tuple
+from uuid import uuid4
 
 import aiofiles
 from fastapi import HTTPException, UploadFile, status
@@ -18,6 +19,7 @@ _settings = get_settings()
 
 MEDIA_ROOT: Final[Path] = Path(_settings.media_root).resolve()
 ANIMAL_PHOTOS_SUBDIR: Final[str] = _settings.animal_photos_subdir
+AVATAR_SUBDIR: Final[str] = _settings.avatar_subdir
 
 
 def _ensure_media_dirs_exist() -> None:
@@ -203,6 +205,87 @@ async def save_animal_photo_file(
 
     return url, thumb_url
 
+
+async def save_user_avatar_file(
+    owner_user_id: int,
+    file: UploadFile,
+) -> str:
+    """
+    Сохраняет аватар пользователя, возвращает публичный URL.
+    Старые файлы не трогает: их надо удалять отдельной функцией по URL.
+    """
+    content_type = file.content_type or ""
+    if content_type not in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
+        logger.warning("Недопустимый тип файла для аватарки: %s", content_type)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only JPEG, PNG or WEBP images are allowed for avatar",
+        )
+
+    data = await file.read()
+    max_bytes = _settings.animal_photo_max_bytes  # можно завести отдельный avatar_max_bytes
+    if len(data) > max_bytes:
+        logger.warning(
+            "Размер файла аватарки превышает лимит: %s > %s байт",
+            len(data),
+            max_bytes,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Avatar file is too large",
+        )
+
+    try:
+        image = Image.open(BytesIO(data))
+        image.verify()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Файл аватарки не является валидным изображением")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid image file",
+        ) from exc
+
+    image = Image.open(BytesIO(data))
+    image = image.convert("RGB")
+
+    max_w = _settings.animal_photo_max_width
+    max_h = _settings.animal_photo_max_height
+    image.thumbnail((max_w, max_h))
+
+    user_dir = MEDIA_ROOT / AVATAR_SUBDIR / str(owner_user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = ".jpg"
+    save_format = "JPEG"
+    if content_type == "image/webp":
+        ext = ".webp"
+        save_format = "WEBP"
+    elif content_type == "image/png":
+        ext = ".png"
+        save_format = "PNG"
+
+    filename = f"{uuid4().hex}{ext}"
+    file_path = user_dir / filename
+
+    buffer = BytesIO()
+    quality = _settings.animal_photo_quality
+    image.save(buffer, format=save_format, quality=quality, optimize=True)
+    buffer.seek(0)
+
+    async with aiofiles.open(file_path, "wb") as out:
+        await out.write(buffer.read())
+
+    relative_path = file_path.relative_to(MEDIA_ROOT)
+    url = f"/media/{relative_path.as_posix()}"
+
+    logger.info(
+        "Сохраняет аватар пользователя %s в файл %s (url=%s)",
+        owner_user_id,
+        file_path,
+        url,
+    )
+
+    return url
 
 def delete_media_file_by_url(url: str) -> None:
     """

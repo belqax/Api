@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.db import engine
 from app.middleware.ip_rate_limit import IPRateLimitMiddleware
 from app.models import Base
-from app.routers import auth, profile, animals, feed, matches, addresses
+from app.routers import auth, profile, animals, feed, matches, addresses, likes
 
 settings = get_settings()
 
@@ -41,4 +41,5 @@ app.include_router(animals.router)
 app.include_router(feed.router)
 app.include_router(matches.router)
 app.include_router(addresses.router)
+app.include_router(likes.router)
 
