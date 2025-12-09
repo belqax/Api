@@ -12,7 +12,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text, func,
+    Text, func, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import INET, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
