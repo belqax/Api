@@ -9,11 +9,11 @@ from fastapi import (
     UploadFile,
     File,
     status,
+    Query
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload, Query
-
+from sqlalchemy.orm import selectinload
 from ..deps import get_db, get_current_user
 from ..models import User, Animal
 from ..schemas import (
