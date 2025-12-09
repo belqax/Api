@@ -65,19 +65,20 @@ async def list_my_animals(
     return [AnimalWithPhotos.model_validate(a) for a in animals]
 
 
-@router.post(
-    "",
-    response_model=AnimalWithPhotos,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("", response_model=AnimalWithPhotos)
 async def create_my_animal(
     payload: AnimalCreateRequest,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> AnimalWithPhotos:
-    animal = await create_animal(...)
+    current_user: User = Depends(get_current_user),
+):
+    # 1. создаём животное корректно
+    animal = await create_animal(
+        db=db,
+        owner_user_id=current_user.id,
+        payload=payload,
+    )
 
-    # повторно загружаем с подгруженными photos
+    # 2. повторно загружаем с eager-load, чтобы Pydantic не триггерил lazy load
     stmt = (
         select(Animal)
         .options(selectinload(Animal.photos))
