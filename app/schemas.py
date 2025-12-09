@@ -79,6 +79,9 @@ class UserLoginRequest(BaseModel):
     login: constr(min_length=3, max_length=255)
     password: constr(min_length=8, max_length=128)
 
+class UserRefreshRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
 
 class UserProfileUpdateRequest(BaseModel):
     display_name: Optional[str] = None

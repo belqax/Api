@@ -15,7 +15,7 @@ from ..schemas import (
     SimpleDetailResponse,
     TokenPair,
     UserLoginRequest, PasswordForgotRequest, PasswordResetRequest, PasswordChangeRequest, SessionsRevokeAllRequest,
-    ResendVerificationEmailRequest,
+    ResendVerificationEmailRequest, UserRefreshRequest,
 )
 from ..security import (
     hash_password,
@@ -569,13 +569,18 @@ async def sessions_revoke_all(
 
 @router.post("/refresh", response_model=TokenPair)
 async def refresh_tokens(
-    request: Request,
+    payload: UserRefreshRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
-    data = await request.json()
-    refresh_token = data.get("refresh_token")
+    # pydantic уже распарсил JSON в объект
+    refresh_token = payload.refresh_token
+
     # Для обратной совместимости поддерживает login/email/phone
-    login = data.get("login") or data.get("email") or data.get("phone")
+    login = (
+        getattr(payload, "login", None)
+        or getattr(payload, "email", None)
+        or getattr(payload, "phone", None)
+    )
 
     if not refresh_token or not login:
         raise HTTPException(
@@ -624,7 +629,10 @@ async def refresh_tokens(
         user_agent=session.user_agent,
     )
 
-    return TokenPair(access_token=new_access, refresh_token=new_refresh)
+    return TokenPair(
+        access_token=new_access,
+        refresh_token=new_refresh,
+    )
 
 
 @router.post("/logout")
