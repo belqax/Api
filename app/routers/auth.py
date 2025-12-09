@@ -15,6 +15,7 @@ from ..schemas import (
     SimpleDetailResponse,
     TokenPair,
     UserLoginRequest, PasswordForgotRequest, PasswordResetRequest, PasswordChangeRequest, SessionsRevokeAllRequest,
+    ResendVerificationEmailRequest,
 )
 from ..security import (
     hash_password,
@@ -151,11 +152,10 @@ async def register(
 
 @router.post("/email/resend", response_model=SimpleDetailResponse)
 async def resend_verification_email(
-    request: Request,
+    payload: ResendVerificationEmailRequest,
     db: AsyncSession = Depends(get_db),
 ) -> SimpleDetailResponse:
-    data = await request.json()
-    email = data.get("email")
+    email = payload.email
 
     if not email:
         raise HTTPException(
@@ -218,7 +218,6 @@ async def resend_verification_email(
     await send_email_verification_code(email, verification_code)
 
     return SimpleDetailResponse(detail="verification_code_resent")
-
 
 @router.post(
     "/register/confirm",

@@ -87,6 +87,10 @@ class UserProfileUpdateRequest(BaseModel):
     location: Optional[str] = None
 
 
+class ResendVerificationEmailRequest(BaseModel):
+    email: EmailStr
+
+
 # ---------- ANIMALS ----------
 
 class AnimalPhoto(BaseModel):
