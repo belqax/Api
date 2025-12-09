@@ -78,6 +78,7 @@ async def search_animals(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     order_by: str = Query("created_at_desc"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[AnimalWithPhotos]:
     animals = await list_public_animals(
