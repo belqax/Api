@@ -70,13 +70,13 @@ async def search_animals(
     species: str | None = None,
     city: str | None = None,
     sex: str | None = None,
-    age_from_years: int | None = Query(default=None, ge=0, le=50),
-    age_to_years: int | None = Query(default=None, ge=0, le=50),
+    age_from_years: int | None = Query(None, ge=0, le=50),
+    age_to_years: int | None = Query(None, ge=0, le=50),
     has_photos: bool | None = None,
     status: str | None = "active",
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    order_by: str = Query(default="created_at_desc"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    order_by: str = Query("created_at_desc"),
     db: AsyncSession = Depends(get_db),
 ) -> List[AnimalWithPhotos]:
     animals = await list_public_animals(
