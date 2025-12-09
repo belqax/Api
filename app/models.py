@@ -46,15 +46,9 @@ class User(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    profile: Mapped["UserProfile"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
-    )
-    privacy_settings: Mapped["UserPrivacySettings"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
-    )
-    settings: Mapped["UserSettings"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
-    )
+    profile = relationship("UserProfile", back_populates="user", lazy="selectin")
+    privacy_settings = relationship("UserPrivacySettings", back_populates="user", lazy="selectin")
+    settings = relationship("UserSettings", back_populates="user", lazy="selectin")
     devices: Mapped[List["UserDevice"]] = relationship(back_populates="user")
     sessions: Mapped[List["UserSession"]] = relationship(back_populates="user")
     animals: Mapped[List["Animal"]] = relationship(back_populates="owner")
@@ -252,8 +246,10 @@ class Animal(Base):
     )
 
     owner: Mapped[User] = relationship(back_populates="animals")
-    photos: Mapped[List["AnimalPhoto"]] = relationship(
-        back_populates="animal", cascade="all, delete-orphan"
+    photos: Mapped[list["AnimalPhoto"]] = relationship(
+        back_populates="animal",
+        cascade="all, delete",
+        lazy="selectin",
     )
 
 

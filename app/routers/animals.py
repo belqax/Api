@@ -10,7 +10,9 @@ from fastapi import (
     File,
     status,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..deps import get_db, get_current_user
 from ..models import User, Animal
@@ -73,11 +75,16 @@ async def create_my_animal(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AnimalWithPhotos:
-    animal = await create_animal(
-        db,
-        owner_user_id=current_user.id,
-        payload=payload,
+    animal = await create_animal(...)
+
+    # повторно загружаем с подгруженными photos
+    stmt = (
+        select(Animal)
+        .options(selectinload(Animal.photos))
+        .where(Animal.id == animal.id)
     )
+    animal = (await db.execute(stmt)).scalar_one()
+
     return AnimalWithPhotos.model_validate(animal)
 
 

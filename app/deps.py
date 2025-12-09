@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import get_session
 from app.models import User
@@ -46,7 +47,11 @@ async def get_current_user(
     except ValueError:
         raise unauthorized
 
-    stmt = select(User).where(User.id == user_id)
+    stmt = select(User).options(
+        selectinload(User.profile),
+        selectinload(User.privacy_settings),
+        selectinload(User.settings),
+    ).where(User.id == user_id)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:

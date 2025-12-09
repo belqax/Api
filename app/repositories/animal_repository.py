@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models import Animal, AnimalPhoto
 from ..schemas import AnimalCreateRequest, AnimalUpdateRequest
@@ -39,7 +40,7 @@ async def create_animal(
     )
     db.add(animal)
     await db.commit()
-    await db.refresh(animal)
+    await db.refresh(animal, attribute_names=["photos"])
     return animal
 
 
@@ -48,7 +49,11 @@ async def get_animal_by_id(
     *,
     animal_id: int,
 ) -> Optional[Animal]:
-    stmt = select(Animal).where(Animal.id == animal_id)
+    stmt = (
+        select(Animal)
+        .options(selectinload(Animal.photos))
+        .where(Animal.id == animal_id)
+    )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -58,7 +63,11 @@ async def list_animals_for_owner(
     *,
     owner_user_id: int,
 ) -> List[Animal]:
-    stmt = select(Animal).where(Animal.owner_user_id == owner_user_id)
+    stmt = (
+        select(Animal)
+        .options(selectinload(Animal.photos))
+        .where(Animal.owner_user_id == owner_user_id)
+    )
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -71,7 +80,7 @@ async def update_animal(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(animal, field, value)
     await db.commit()
-    await db.refresh(animal)
+    await db.refresh(animal, attribute_names=["photos"])
     return animal
 
 
