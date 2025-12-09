@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     password_reset_code_ttl_minutes: int = 15
     password_reset_max_attempts: int = 5
 
+    ip_rate_limit_requests_per_minute: int = 60
+    ip_rate_limit_block_ttl_seconds: int = 600  # сколько держать блокировку IP
+    ip_rate_limit_redis_dsn: str = "redis://localhost:6379/0"
+
     # SMTP для отправки писем
     smtp_host: str = "127.0.0.1"
     smtp_port: int = 587
@@ -56,8 +60,26 @@ class Settings(BaseSettings):
     smtp_from_name: str = "Pature"
 
     # Медиа
-    media_root: str = str(PROJECT_ROOT  / "media")
+    media_root: str = str(PROJECT_ROOT / "media")
     avatar_subdir: str = "avatars"
+    animal_photos_subdir: str = "animals"  # подкаталог для фото животных
+
+    # Параметры изображений животных
+    animal_photo_max_bytes: int = 5 * 1024 * 1024          # 5 МБ
+    animal_photo_allowed_mime_types: tuple[str, ...] = (
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+    )
+    animal_photo_max_width: int = 1920
+    animal_photo_max_height: int = 1920
+    animal_photo_quality: int = 85                         # JPEG/WebP качество
+
+    animal_thumb_max_width: int = 400
+    animal_thumb_max_height: int = 400
+    animal_thumb_quality: int = 80
+
 
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT  / ".env"),

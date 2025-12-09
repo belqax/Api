@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import engine
+from app.middleware.ip_rate_limit import IPRateLimitMiddleware
 from app.models import Base
 from app.routers import auth, profile, animals
 
@@ -32,6 +33,7 @@ async def on_startup() -> None:
 
     os.makedirs(settings.media_root, exist_ok=True)
 
+app.add_middleware(IPRateLimitMiddleware)
 
 app.include_router(auth.router)
 app.include_router(profile.router)

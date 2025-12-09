@@ -96,6 +96,7 @@ class ResendVerificationEmailRequest(BaseModel):
 class AnimalPhoto(BaseModel):
     id: int
     url: str
+    thumb_url: Optional[str] = None
     is_primary: bool
     position: int
 
@@ -221,3 +222,8 @@ class SessionsRevokeAllRequest(BaseModel):
     # Если передан refresh_token текущей сессии – её можно оставить,
     # а все остальные сессии ревокнуть. Если None – ревокнуть все.
     refresh_token: constr(min_length=10, max_length=1024) | None = None
+
+# ---------- ANIMAL PHOTOS MANAGEMENT ----------
+
+class AnimalPhotosReorderRequest(BaseModel):
+    photo_ids: List[int]

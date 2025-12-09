@@ -266,6 +266,7 @@ class AnimalPhoto(Base):
     )
 
     url: Mapped[str] = mapped_column(String(500), nullable=False)
+    thumb_url: Mapped[Optional[str]] = mapped_column(String(500))  # <-- новое поле
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
