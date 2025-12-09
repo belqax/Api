@@ -16,11 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ..deps import get_db, get_current_user
 from ..models import User, Animal
+from ..repositories.matching_repository import create_or_update_like, detect_mutual_like_and_create_match
 from ..schemas import (
     AnimalWithPhotos,
     AnimalCreateRequest,
     AnimalUpdateRequest,
-    AnimalPhotosReorderRequest, AnimalStatusUpdateRequest,
+    AnimalPhotosReorderRequest, AnimalStatusUpdateRequest, AnimalLikeResult,
 )
 from ..repositories.animal_repository import (
     create_animal,
@@ -332,3 +333,94 @@ async def delete_animal_photo_endpoint(
 
     await db.refresh(animal)
     return AnimalWithPhotos.model_validate(animal)
+
+
+@router.post(
+    "/{animal_id}/like",
+    response_model=AnimalLikeResult,
+)
+async def like_animal(
+    animal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnimalLikeResult:
+    # Проверяет, что животное существует и не принадлежит пользователю
+    animal = await get_animal_by_id(db, animal_id=animal_id)
+    if animal is None or animal.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Animal not found",
+        )
+
+    if animal.owner_user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot like your own animal",
+        )
+
+    like = await create_or_update_like(
+        db,
+        from_user_id=current_user.id,
+        animal_id=animal.id,
+        result="like",
+    )
+
+    match, match_created = await detect_mutual_like_and_create_match(
+        db,
+        from_user_id=current_user.id,
+        target_animal_id=animal.id,
+    )
+
+    return AnimalLikeResult(
+        animal_id=animal.id,
+        from_user_id=current_user.id,
+        result="like",
+        created_at=like.created_at,
+        match_created=match_created,
+        match_user_id=(
+            match.user_id1 if match and match.user_id1 != current_user.id else
+            (match.user_id2 if match and match.user_id2 != current_user.id else None)
+        ),
+        match_id=match.id if match else None,
+    )
+
+
+@router.post(
+    "/{animal_id}/dislike",
+    response_model=AnimalLikeResult,
+)
+async def dislike_animal(
+    animal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnimalLikeResult:
+    animal = await get_animal_by_id(db, animal_id=animal_id)
+    if animal is None or animal.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Animal not found",
+        )
+
+    if animal.owner_user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot dislike your own animal",
+        )
+
+    like = await create_or_update_like(
+        db,
+        from_user_id=current_user.id,
+        animal_id=animal.id,
+        result="dislike",
+    )
+
+    # При дизлайке матч не создаётся
+    return AnimalLikeResult(
+        animal_id=animal.id,
+        from_user_id=current_user.id,
+        result="dislike",
+        created_at=like.created_at,
+        match_created=False,
+        match_user_id=None,
+        match_id=None,
+    )

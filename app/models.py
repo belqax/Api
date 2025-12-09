@@ -57,6 +57,34 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    animals: Mapped[List["Animal"]] = relationship(back_populates="owner")
+    email_verification_codes: Mapped[list["EmailVerificationCode"]] = relationship(
+        "EmailVerificationCode",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    sent_likes: Mapped[list["AnimalLike"]] = relationship(
+        "AnimalLike",
+        back_populates="from_user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    matches_as_user1: Mapped[list["UserMatch"]] = relationship(
+        "UserMatch",
+        back_populates="user1",
+        foreign_keys="UserMatch.user_id1",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    matches_as_user2: Mapped[list["UserMatch"]] = relationship(
+        "UserMatch",
+        back_populates="user2",
+        foreign_keys="UserMatch.user_id2",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class UserProfile(Base):
@@ -251,6 +279,19 @@ class Animal(Base):
         cascade="all, delete",
         lazy="selectin",
     )
+    owner: Mapped[User] = relationship(back_populates="animals")
+    photos: Mapped[list["AnimalPhoto"]] = relationship(
+        back_populates="animal",
+        cascade="all, delete",
+        lazy="selectin",
+    )
+
+    received_likes: Mapped[list["AnimalLike"]] = relationship(
+        "AnimalLike",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class AnimalPhoto(Base):
@@ -299,3 +340,110 @@ class EmailVerificationCode(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="email_verification_codes")
+
+class AnimalLike(Base):
+    __tablename__ = "animal_likes"
+    __table_args__ = (
+        UniqueConstraint(
+            "from_user_id",
+            "animal_id",
+            name="uq_animal_likes_from_user_animal",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    from_user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    animal_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("animals.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # "like" или "dislike"
+    result: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+    )
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+    from_user: Mapped["User"] = relationship(
+        "User",
+        back_populates="sent_likes",
+    )
+    animal: Mapped["Animal"] = relationship(
+        "Animal",
+        back_populates="received_likes",
+    )
+
+
+class UserMatch(Base):
+    __tablename__ = "user_matches"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id1",
+            "user_id2",
+            name="uq_user_matches_pair",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    # Инвариант: user_id1 < user_id2
+    user_id1: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id2: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
+
+    # В перспективе можно добавить поля архивации/блокировки
+    # is_active, archived_by_user1, archived_by_user2 и т.п.
+
+    user1: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[user_id1],
+        back_populates="matches_as_user1",
+    )
+    user2: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[user_id2],
+        back_populates="matches_as_user2",
+    )

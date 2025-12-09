@@ -4,7 +4,7 @@ from sqlalchemy import select, and_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..models import Animal, AnimalPhoto
+from ..models import Animal, AnimalPhoto, AnimalLike
 from ..schemas import AnimalCreateRequest, AnimalUpdateRequest
 
 
@@ -164,5 +164,69 @@ async def list_public_animals(
         stmt = stmt.order_by(Animal.created_at.desc())
 
     stmt = stmt.offset(offset).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+async def list_feed_animals(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+    species: str | None = None,
+    city: str | None = None,
+    sex: str | None = None,
+    age_from_years: int | None = None,
+    age_to_years: int | None = None,
+    has_photos: bool | None = None,
+    status: str | None = "active",
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Animal]:
+    stmt = select(Animal).options(selectinload(Animal.photos))
+
+    conditions = []
+
+    if status:
+        conditions.append(Animal.status == status)
+
+    # Не показывать своих животных
+    conditions.append(Animal.owner_user_id != current_user_id)
+
+    if species:
+        conditions.append(Animal.species == species)
+
+    if city:
+        conditions.append(Animal.city == city)
+
+    if sex:
+        conditions.append(Animal.sex == sex)
+
+    if age_from_years is not None:
+        conditions.append(Animal.approx_age_years >= age_from_years)
+
+    if age_to_years is not None:
+        conditions.append(Animal.approx_age_years <= age_to_years)
+
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+
+    if has_photos is not None:
+        photos_exists = exists().where(AnimalPhoto.animal_id == Animal.id)
+        if has_photos:
+            stmt = stmt.where(photos_exists)
+        else:
+            stmt = stmt.where(~photos_exists)
+
+    # Исключает животных, по которым уже есть лайк/дизлайк от пользователя
+    interacted_exists = exists().where(
+        and_(
+            AnimalLike.animal_id == Animal.id,
+            AnimalLike.from_user_id == current_user_id,
+        )
+    )
+    stmt = stmt.where(~interacted_exists)
+
+    stmt = stmt.order_by(Animal.created_at.desc())
+    stmt = stmt.offset(offset).limit(limit)
+
     result = await db.execute(stmt)
     return list(result.scalars().all())

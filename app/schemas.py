@@ -234,3 +234,25 @@ class AnimalPhotosReorderRequest(BaseModel):
 
 class AnimalStatusUpdateRequest(BaseModel):
     status: Literal["active", "hidden", "adopted", "archived"]
+
+class AnimalLikeResult(BaseModel):
+    animal_id: int
+    from_user_id: int
+    result: Literal["like", "dislike"]
+    created_at: dt.datetime
+    match_created: bool = False
+    match_user_id: Optional[int] = None
+    match_id: Optional[int] = None
+
+
+class MatchUserSummary(BaseModel):
+    user: "UserBase"
+    profile: "UserProfile"
+
+
+class MatchListItem(BaseModel):
+    id: int
+    counterpart: MatchUserSummary
+    created_at: dt.datetime
+
+MatchUserSummary.model_rebuild()
