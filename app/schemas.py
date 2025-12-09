@@ -80,6 +80,7 @@ class UserLoginRequest(BaseModel):
     password: constr(min_length=8, max_length=128)
 
 class UserRefreshRequest(BaseModel):
+    login: Optional[str] = None
     refresh_token: Optional[str] = None
 
 
