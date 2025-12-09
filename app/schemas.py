@@ -255,4 +255,41 @@ class MatchListItem(BaseModel):
     counterpart: MatchUserSummary
     created_at: dt.datetime
 
+class AddressSuggestion(BaseModel):
+    formatted: str
+    lat: float
+    lon: float
+
+    country: str | None = None
+    state: str | None = None
+    region: str | None = None
+    county: str | None = None
+    city: str | None = None
+    district: str | None = None
+    neighbourhood: str | None = None
+    postcode: str | None = None
+    street: str | None = None
+    housenumber: str | None = None
+
+    plus_code: str | None = None
+    timezone: str | None = None
+    result_type: str | None = None
+    confidence: float | None = None
+
+
+class AddressAutocompleteResponse(BaseModel):
+    query_text: str
+    suggestions: List[AddressSuggestion]
+
+
+class ReverseGeocodeResponse(BaseModel):
+    query_lat: float
+    query_lon: float
+    results: List[AddressSuggestion]
+
+
+class AddressSearchResponse(BaseModel):
+    query_text: str
+    results: List[AddressSuggestion]
+
 MatchUserSummary.model_rebuild()

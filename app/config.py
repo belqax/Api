@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     avatar_subdir: str = "avatars"
     animal_photos_subdir: str = "animals"  # подкаталог для фото животных
 
+    # Geoapify геокодинг
+    geoapify_api_key: str | None = None
+    geoapify_base_url: str = "https://api.geoapify.com/v1/geocode/autocomplete"
+    geoapify_reverse_url: str = "https://api.geoapify.com/v1/geocode/reverse"
+    geoapify_search_url: str = "https://api.geoapify.com/v1/geocode/search"
+    geoapify_default_lang: str = "ru"
+    geoapify_default_limit: int = 5
+
     # Параметры изображений животных
     animal_photo_max_bytes: int = 5 * 1024 * 1024          # 5 МБ
     animal_photo_allowed_mime_types: tuple[str, ...] = (
