@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from pydantic import BaseModel, Field, EmailStr, constr
 
@@ -227,3 +227,6 @@ class SessionsRevokeAllRequest(BaseModel):
 
 class AnimalPhotosReorderRequest(BaseModel):
     photo_ids: List[int]
+
+class AnimalStatusUpdateRequest(BaseModel):
+    status: Literal["active", "hidden", "adopted", "archived"]

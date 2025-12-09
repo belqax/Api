@@ -12,7 +12,7 @@ from fastapi import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, Query
 
 from ..deps import get_db, get_current_user
 from ..models import User, Animal
@@ -20,14 +20,14 @@ from ..schemas import (
     AnimalWithPhotos,
     AnimalCreateRequest,
     AnimalUpdateRequest,
-    AnimalPhotosReorderRequest,
+    AnimalPhotosReorderRequest, AnimalStatusUpdateRequest,
 )
 from ..repositories.animal_repository import (
     create_animal,
     get_animal_by_id,
     list_animals_for_owner,
     update_animal,
-    delete_animal,
+    delete_animal, list_public_animals, change_animal_status,
 )
 from ..repositories.animal_photo_repository import (
     create_animal_photo,
@@ -56,12 +56,42 @@ async def _get_owned_animal_or_404(
     return animal
 
 
-@router.get("", response_model=List[AnimalWithPhotos])
+@router.get("/my", response_model=List[AnimalWithPhotos])
 async def list_my_animals(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> List[AnimalWithPhotos]:
     animals = await list_animals_for_owner(db, owner_user_id=current_user.id)
+    return [AnimalWithPhotos.model_validate(a) for a in animals]
+
+
+@router.get("", response_model=List[AnimalWithPhotos])
+async def search_animals(
+    species: str | None = None,
+    city: str | None = None,
+    sex: str | None = None,
+    age_from_years: int | None = Query(default=None, ge=0, le=50),
+    age_to_years: int | None = Query(default=None, ge=0, le=50),
+    has_photos: bool | None = None,
+    status: str | None = "active",
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    order_by: str = Query(default="created_at_desc"),
+    db: AsyncSession = Depends(get_db),
+) -> List[AnimalWithPhotos]:
+    animals = await list_public_animals(
+        db,
+        species=species,
+        city=city,
+        sex=sex,
+        age_from_years=age_from_years,
+        age_to_years=age_to_years,
+        has_photos=has_photos,
+        status=status,
+        limit=limit,
+        offset=offset,
+        order_by=order_by,
+    )
     return [AnimalWithPhotos.model_validate(a) for a in animals]
 
 
@@ -100,6 +130,30 @@ async def get_animal(
         animal_id=animal_id,
         current_user=current_user,
     )
+    return AnimalWithPhotos.model_validate(animal)
+
+@router.patch(
+    "/{animal_id}/status",
+    response_model=AnimalWithPhotos,
+)
+async def change_my_animal_status(
+    animal_id: int,
+    payload: AnimalStatusUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AnimalWithPhotos:
+    animal = await _get_owned_animal_or_404(
+        db,
+        animal_id=animal_id,
+        current_user=current_user,
+    )
+
+    animal = await change_animal_status(
+        db,
+        animal=animal,
+        new_status=payload.status,
+    )
+
     return AnimalWithPhotos.model_validate(animal)
 
 

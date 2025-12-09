@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, and_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -83,6 +83,17 @@ async def update_animal(
     await db.refresh(animal, attribute_names=["photos"])
     return animal
 
+async def change_animal_status(
+    db: AsyncSession,
+    *,
+    animal: Animal,
+    new_status: str,
+) -> Animal:
+    animal.status = new_status
+    await db.commit()
+    await db.refresh(animal, attribute_names=["photos"])
+    return animal
+
 
 async def delete_animal(
     db: AsyncSession,
@@ -90,3 +101,68 @@ async def delete_animal(
 ) -> None:
     await db.delete(animal)
     await db.commit()
+
+async def list_public_animals(
+    db: AsyncSession,
+    *,
+    species: Optional[str] = None,
+    city: Optional[str] = None,
+    sex: Optional[str] = None,
+    age_from_years: Optional[int] = None,
+    age_to_years: Optional[int] = None,
+    has_photos: Optional[bool] = None,
+    status: Optional[str] = "active",
+    limit: int = 50,
+    offset: int = 0,
+    order_by: str = "created_at_desc",
+) -> List[Animal]:
+    """
+    Возвращает список животных для публичного фида с фильтрами и пагинацией.
+    Фильтрация по возрасту использует поля approx_age_years.
+    """
+
+    stmt = select(Animal).options(selectinload(Animal.photos))
+    conditions = []
+
+    if status:
+        conditions.append(Animal.status == status)
+
+    if species:
+        conditions.append(Animal.species == species)
+
+    if city:
+        # При необходимости можно заменить на ilike для нечувствительного поиска
+        conditions.append(Animal.city == city)
+
+    if sex:
+        conditions.append(Animal.sex == sex)
+
+    if age_from_years is not None:
+        conditions.append(Animal.approx_age_years >= age_from_years)
+
+    if age_to_years is not None:
+        conditions.append(Animal.approx_age_years <= age_to_years)
+
+    if conditions:
+        stmt = stmt.where(and_(*conditions))
+
+    if has_photos is not None:
+        photos_exists = exists().where(AnimalPhoto.animal_id == Animal.id)
+        if has_photos:
+            stmt = stmt.where(photos_exists)
+        else:
+            stmt = stmt.where(~photos_exists)
+
+    if order_by == "created_at_asc":
+        stmt = stmt.order_by(Animal.created_at.asc())
+    elif order_by == "updated_at_desc":
+        stmt = stmt.order_by(Animal.updated_at.desc())
+    elif order_by == "updated_at_asc":
+        stmt = stmt.order_by(Animal.updated_at.asc())
+    else:
+        # По умолчанию: новые сначала
+        stmt = stmt.order_by(Animal.created_at.desc())
+
+    stmt = stmt.offset(offset).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
