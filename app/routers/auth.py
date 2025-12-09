@@ -14,7 +14,7 @@ from ..schemas import (
     EmailVerificationConfirmRequest,
     SimpleDetailResponse,
     TokenPair,
-    UserLoginRequest,
+    UserLoginRequest, PasswordForgotRequest, PasswordResetRequest, PasswordChangeRequest, SessionsRevokeAllRequest,
 )
 from ..security import (
     hash_password,
@@ -31,14 +31,49 @@ from ..repositories.user_repository import (
     upsert_device,
     create_session,
     get_session_by_refresh_token,
-    revoke_session,
+    revoke_session, revoke_all_sessions_for_user,
 )
-from app.services.email_service import send_email_verification_code
+from app.services.email_service import send_email_verification_code, send_password_reset_code
 from app.config import get_settings
 from app.utils.validators import normalize_ru_phone, validate_password_strength
+from ..services.rate_limiter import enforce_code_send_limits
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+
+
+
+
+def _get_user_by_login(
+    db: AsyncSession,
+    login: str,
+) -> User:
+    """
+    Ищет пользователя по логину (e-mail или телефон).
+    Внутри хелпера не используется await, поэтому реализуется
+    как отдельная async-функция ниже.
+    """
+    raise NotImplementedError("Use async_get_user_by_login instead")
+
+
+async def async_get_user_by_login(
+    db: AsyncSession,
+    login: str,
+) -> User | None:
+    """
+    Ищет пользователя по логину:
+    - если login содержит '@', считает его e-mail;
+    - иначе считает его телефоном и нормализует под RU-формат.
+    """
+    login = login.strip()
+    if not login:
+        return None
+
+    if "@" in login:
+        return await get_user_by_email(db, login)
+
+    normalized_phone = normalize_ru_phone(login)
+    return await get_user_by_phone(db, normalized_phone)
 
 
 @router.post(
@@ -117,21 +152,20 @@ async def register(
 @router.post("/email/resend", response_model=SimpleDetailResponse)
 async def resend_verification_email(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> SimpleDetailResponse:
-    """
-    Повторно отправляет письмо верификации, если с последней отправки прошло ≥ 60 секунд.
-    """
     data = await request.json()
     email = data.get("email")
 
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="email is required"
+            detail={
+                "code": "email_required",
+                "message": "email is required",
+            },
         )
 
-    # Ищем пользователя
     stmt_user = select(User).where(User.email == email)
     result_user = await db.execute(stmt_user)
     user = result_user.scalar_one_or_none()
@@ -139,7 +173,10 @@ async def resend_verification_email(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail={
+                "code": "user_not_found",
+                "message": "User not found",
+            },
         )
 
     if user.is_email_verified:
@@ -147,40 +184,26 @@ async def resend_verification_email(
 
     now = dt.datetime.now(dt.timezone.utc)
 
-    # Ищем последнюю запись отправки письма (даже если код уже использован)
-    stmt_last = (
-        select(EmailVerificationCode)
-        .where(
-            EmailVerificationCode.user_id == user.id,
-            EmailVerificationCode.email == email,
-            EmailVerificationCode.purpose == "register",
-        )
-        .order_by(EmailVerificationCode.created_at.desc())
-        .limit(1)
+    await enforce_code_send_limits(
+        db,
+        model=EmailVerificationCode,
+        user_id=user.id,
+        target_value=email,
+        purpose="register",
+        now=now,
+        cooldown_seconds=settings.email_verification_resend_cooldown_seconds,
+        max_per_hour=settings.email_verification_resend_max_per_hour,
+        channel="email",
+        target_field="email",
     )
-    result_last = await db.execute(stmt_last)
-    last_code = result_last.scalar_one_or_none()
 
-    # Проверяем cooldown = 60 сек
-    COOLDOWN_SECONDS = 60
-
-    if last_code:
-        elapsed = (now - last_code.created_at).total_seconds()
-        if elapsed < COOLDOWN_SECONDS:
-            remaining = int(COOLDOWN_SECONDS - elapsed)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Please wait {remaining} seconds before requesting a new code"
-            )
-
-    # Генерируем новый код
     verification_code = generate_numeric_code(6)
     code_hash = hash_verification_code(verification_code)
     expires_at = now + dt.timedelta(
         minutes=settings.email_verification_code_ttl_minutes
     )
 
-    new_code = EmailVerificationCode(
+    new_code_row = EmailVerificationCode(
         user_id=user.id,
         email=email,
         purpose="register",
@@ -189,13 +212,13 @@ async def resend_verification_email(
         max_attempts=settings.email_verification_max_attempts,
     )
 
-    db.add(new_code)
+    db.add(new_code_row)
     await db.commit()
 
-    # Отправка письма
     await send_email_verification_code(email, verification_code)
 
     return SimpleDetailResponse(detail="verification_code_resent")
+
 
 @router.post(
     "/register/confirm",
@@ -264,37 +287,143 @@ async def confirm_email(
 
     return SimpleDetailResponse(detail="email_verified")
 
-
-def _get_user_by_login(
-    db: AsyncSession,
-    login: str,
-) -> User:
+@router.post("/password/forgot", response_model=SimpleDetailResponse)
+async def password_forgot(
+    payload: PasswordForgotRequest,
+    db: AsyncSession = Depends(get_db),
+) -> SimpleDetailResponse:
     """
-    Ищет пользователя по логину (e-mail или телефон).
-    Внутри хелпера не используется await, поэтому реализуется
-    как отдельная async-функция ниже.
+    Запускает процесс сброса пароля:
+    - находит пользователя по e-mail;
+    - создаёт одноразовый код purpose='reset_password';
+    - отправляет письмо;
+    - применяет rate-limit, чтобы не спамить.
     """
-    raise NotImplementedError("Use async_get_user_by_login instead")
+    stmt_user = select(User).where(User.email == payload.email)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
 
+    # Не даём утечку информации о том, существует ли пользователь.
+    # Если пользователя нет – отвечаем так же, как при успехе.
+    if user is None:
+        return SimpleDetailResponse(detail="password_reset_email_sent")
 
-async def async_get_user_by_login(
-    db: AsyncSession,
-    login: str,
-) -> User | None:
+    now = dt.datetime.now(dt.timezone.utc)
+
+    await enforce_code_send_limits(
+        db,
+        model=EmailVerificationCode,
+        user_id=user.id,
+        target_value=payload.email,
+        purpose="reset_password",
+        now=now,
+        cooldown_seconds=settings.email_verification_resend_cooldown_seconds,
+        max_per_hour=settings.email_verification_resend_max_per_hour,
+        channel="email",
+        target_field="email",
+    )
+
+    code = generate_numeric_code(6)
+    code_hash = hash_verification_code(code)
+    expires_at = now + dt.timedelta(
+        minutes=settings.password_reset_code_ttl_minutes
+    )
+
+    reset_code = EmailVerificationCode(
+        user_id=user.id,
+        email=payload.email,
+        purpose="reset_password",
+        code_hash=code_hash,
+        expires_at=expires_at,
+        max_attempts=settings.password_reset_max_attempts,
+    )
+    db.add(reset_code)
+    await db.commit()
+
+    await send_password_reset_code(payload.email, code)
+
+    return SimpleDetailResponse(detail="password_reset_email_sent")
+
+@router.post("/password/reset", response_model=SimpleDetailResponse)
+async def password_reset(
+    payload: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+) -> SimpleDetailResponse:
     """
-    Ищет пользователя по логину:
-    - если login содержит '@', считает его e-mail;
-    - иначе считает его телефоном и нормализует под RU-формат.
+    Подтверждает сброс пароля кодом:
+    - валидирует код (TTL, попытки, соответствие хешу);
+    - валидирует сложность нового пароля;
+    - обновляет hashed_password;
+    - ревокирует все сессии пользователя.
     """
-    login = login.strip()
-    if not login:
-        return None
+    stmt_user = select(User).where(User.email == payload.email)
+    result_user = await db.execute(stmt_user)
+    user = result_user.scalar_one_or_none()
 
-    if "@" in login:
-        return await get_user_by_email(db, login)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found",
+        )
 
-    normalized_phone = normalize_ru_phone(login)
-    return await get_user_by_phone(db, normalized_phone)
+    now = dt.datetime.now(dt.timezone.utc)
+
+    # Берём последний активный код для purpose='reset_password'
+    stmt_code = (
+        select(EmailVerificationCode)
+        .where(
+            EmailVerificationCode.user_id == user.id,
+            EmailVerificationCode.email == payload.email,
+            EmailVerificationCode.purpose == "reset_password",
+            EmailVerificationCode.consumed_at.is_(None),
+            EmailVerificationCode.expires_at > now,
+        )
+        .order_by(EmailVerificationCode.created_at.desc())
+        .limit(1)
+    )
+    result_code = await db.execute(stmt_code)
+    code_row = result_code.scalar_one_or_none()
+
+    if code_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active reset code",
+        )
+
+    if code_row.attempt_count >= code_row.max_attempts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum reset attempts exceeded",
+        )
+
+    # Проверяет код
+    if not verify_verification_code(payload.code, code_row.code_hash):
+        code_row.attempt_count += 1
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset code",
+        )
+
+    # Код корректен – помечаем как использованный
+    code_row.consumed_at = now
+
+    # Валидация сложности нового пароля
+    validate_password_strength(payload.new_password)
+
+    user.hashed_password = hash_password(payload.new_password)
+
+    await db.commit()
+
+    # Ревокируем все сессии пользователя
+    await revoke_all_sessions_for_user(
+        db,
+        user_id=user.id,
+        except_session_id=None,
+        reason="password_reset",
+    )
+
+    return SimpleDetailResponse(detail="password_reset_success")
 
 
 @router.post("/login", response_model=TokenPair)
@@ -362,6 +491,81 @@ async def login(
     )
 
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/password/change", response_model=SimpleDetailResponse)
+async def password_change(
+    payload: PasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SimpleDetailResponse:
+    """
+    Меняет пароль для текущего авторизованного пользователя:
+    - проверяет старый пароль;
+    - валидирует новый;
+    - обновляет hashed_password;
+    - ревокирует все сессии пользователя (в т.ч. текущую).
+    """
+    if not current_user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password is not set for this account",
+        )
+
+    if not verify_password(payload.old_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect old password",
+        )
+
+    validate_password_strength(payload.new_password)
+
+    current_user.hashed_password = hash_password(payload.new_password)
+    await db.commit()
+
+    await revoke_all_sessions_for_user(
+        db,
+        user_id=current_user.id,
+        except_session_id=None,
+        reason="password_change",
+    )
+
+    return SimpleDetailResponse(detail="password_changed")
+
+
+@router.post("/sessions/revoke_all", response_model=SimpleDetailResponse)
+async def sessions_revoke_all(
+    payload: SessionsRevokeAllRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SimpleDetailResponse:
+    """
+    Ревокирует все сессии пользователя.
+    Если передан refresh_token – пытается сохранить только эту сессию.
+    """
+    except_session_id: int | None = None
+
+    if payload.refresh_token:
+        session = await get_session_by_refresh_token(
+            db,
+            user_id=current_user.id,
+            refresh_token_plain=payload.refresh_token,
+        )
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid refresh token in request",
+            )
+        except_session_id = session.id
+
+    await revoke_all_sessions_for_user(
+        db,
+        user_id=current_user.id,
+        except_session_id=except_session_id,
+        reason="manual_revoke_all",
+    )
+
+    return SimpleDetailResponse(detail="sessions_revoked")
 
 
 @router.post("/refresh", response_model=TokenPair)

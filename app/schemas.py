@@ -197,3 +197,23 @@ class EmailVerificationConfirmRequest(BaseModel):
 
 class SimpleDetailResponse(BaseModel):
     detail: str
+
+class PasswordForgotRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+    code: constr(min_length=4, max_length=10)
+    new_password: constr(min_length=8, max_length=128)
+
+
+class PasswordChangeRequest(BaseModel):
+    old_password: constr(min_length=8, max_length=128)
+    new_password: constr(min_length=8, max_length=128)
+
+
+class SessionsRevokeAllRequest(BaseModel):
+    # Если передан refresh_token текущей сессии – её можно оставить,
+    # а все остальные сессии ревокнуть. Если None – ревокнуть все.
+    refresh_token: constr(min_length=10, max_length=1024) | None = None

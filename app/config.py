@@ -25,9 +25,25 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 30
 
-    # Параметры e-mail подтверждения
+    # Верификация e-mail
     email_verification_code_ttl_minutes: int = 15
     email_verification_max_attempts: int = 5
+
+    # Rate-limit на повторную отправку e-mail кода
+    email_verification_resend_cooldown_seconds: int = 60
+    email_verification_resend_max_per_hour: int = 5
+
+    # Верификация телефона (SMS)
+    phone_verification_code_ttl_minutes: int = 15
+    phone_verification_max_attempts: int = 5
+
+    # Rate-limit на повторную отправку SMS кода
+    phone_verification_resend_cooldown_seconds: int = 60
+    phone_verification_resend_max_per_hour: int = 5
+
+    # Сброс пароля (можно использовать те же значения TTL и попыток)
+    password_reset_code_ttl_minutes: int = 15
+    password_reset_max_attempts: int = 5
 
     # SMTP для отправки писем
     smtp_host: str = "127.0.0.1"

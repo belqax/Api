@@ -190,3 +190,34 @@ async def update_profile(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def revoke_all_sessions_for_user(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    except_session_id: Optional[int] = None,
+    reason: str = "bulk_revoke",
+) -> None:
+    """
+    Ревокирует все текущие сессии пользователя.
+    Если задан except_session_id, оставляет одну сессию как текущую.
+    """
+    stmt = select(UserSession).where(
+        UserSession.user_id == user_id,
+        UserSession.is_current.is_(True),
+        UserSession.revoked_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    now = dt.datetime.now(dt.timezone.utc)
+
+    for s in sessions:
+        if except_session_id is not None and s.id == except_session_id:
+            continue
+        s.is_current = False
+        s.revoked_at = now
+        s.revoke_reason = reason
+
+    await db.commit()
