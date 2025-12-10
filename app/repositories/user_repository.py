@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.collections import InstrumentedList
 
 from ..models import (
     User,
@@ -186,56 +187,36 @@ async def update_profile(
     db: AsyncSession,
     user: User,
     *,
-    display_name: Optional[str],
-    age: Optional[int],
-    about: Optional[str],
-    location: Optional[str],
+    display_name: Optional[str] = None,
+    age: Optional[int] = None,
+    about: Optional[str] = None,
+    location: Optional[str] = None,
 ) -> User:
     """
-    Обновляет профиль пользователя:
-    - гарантирует, что у юзера есть ровно один UserProfile;
-    - обновляет только те поля, которые не None;
-    - не падает, если user.profile — InstrumentedList.
+    Обновляет профиль пользователя.
+    - Параметры опциональные: если аргумент не передан, поле не трогает.
+    - Если user.profile отсутствует, создаёт его.
     """
 
-    # Нормализует user.profile к одному объекту UserProfile
-    raw_profile = user.profile
-
-    profile: Optional[UserProfile]
-
-    if isinstance(raw_profile, InstrumentedList):
-        # связь настроена как коллекция; берёт первый элемент, либо создаёт новый
-        if raw_profile:
-            profile = raw_profile[0]
-        else:
-            profile = None
-    else:
-        profile = raw_profile
-
-    if profile is None:
-        # Профиля нет вообще → создаёт
+    if user.profile is None:
         profile = UserProfile(user_id=user.id)
         db.add(profile)
         await db.flush()
         await db.refresh(user)
 
-        # После refresh связь могла обновиться
-        raw_profile = user.profile
-        if isinstance(raw_profile, InstrumentedList):
-            if raw_profile and raw_profile[0] is not profile:
-                # Добавляет созданный профиль в коллекцию, если нужно
-                raw_profile.append(profile)
-        else:
-            user.profile = profile  # на случай однообъектной связи
+    profile = user.profile
 
-    # На этом этапе profile — точно UserProfile
-    # Логирует входящие значения, не трогая сам профиль
-    print("update_profile: user_id=", user.id, "payload=", {
-        "display_name": display_name,
-        "age": age,
-        "about": about,
-        "location": location,
-    })
+    # Лог (по желанию, безопасный — не ломает выполнение)
+    print(
+        "update_profile: user_id=", user.id,
+        "payload=",
+        {
+            "display_name": display_name,
+            "age": age,
+            "about": about,
+            "location": location,
+        },
+    )
 
     if display_name is not None:
         profile.display_name = display_name
@@ -249,24 +230,19 @@ async def update_profile(
     await db.commit()
     await db.refresh(user)
 
-    # Аккуратный лог текущего состояния профиля
     try:
-        normalized_profile = user.profile
-        if isinstance(normalized_profile, InstrumentedList):
-            normalized_profile = normalized_profile[0] if normalized_profile else None
-
-        if normalized_profile is not None:
-            print("update_profile: saved profile for user_id=", user.id, "=>", {
-                "display_name": normalized_profile.display_name,
-                "age": normalized_profile.age,
-                "about": normalized_profile.about,
-                "location": normalized_profile.location,
-            })
-        else:
-            print("update_profile: WARNING: profile is still None for user_id=", user.id)
+        print(
+            "update_profile: saved profile for user_id=", user.id,
+            "=>",
+            {
+                "display_name": profile.display_name,
+                "age": profile.age,
+                "about": profile.about,
+                "location": profile.location,
+            },
+        )
     except Exception as e:
-        # Логирует, но не ломает запрос
-        print("update_profile: error while logging final profile:", repr(e))
+        print("update_profile: log error:", repr(e))
 
     return user
 
