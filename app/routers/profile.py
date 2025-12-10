@@ -40,12 +40,15 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
-    fields_to_update = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
 
     user = await update_profile(
         db,
         current_user,
-        **fields_to_update,
+        display_name=data.get("display_name"),
+        age=data.get("age"),
+        about=data.get("about"),
+        location=data.get("location"),
     )
 
     base = UserBase.model_validate(user)
