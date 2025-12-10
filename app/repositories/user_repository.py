@@ -187,31 +187,59 @@ async def update_profile(
     user: User,
     **fields: Any,
 ) -> User:
-    """
-    Обновляет только те поля профиля, которые переданы в `fields`.
-    Поля, которых нет в словаре, не трогает вообще.
-    """
+    print("\n=== update_profile() CALLED ===")
+    print("FIELDS RECEIVED:", fields)
 
-    # Гарантирует, что у пользователя есть профиль
     if user.profile is None:
+        print("No profile found -> creating new UserProfile")
         profile = UserProfile(user_id=user.id)
         db.add(profile)
         await db.flush()
         await db.refresh(user)
-
     profile = user.profile
 
-    # Применяет только реально переданные поля
+    # Показать старые значения
+    print("OLD VALUES:", {
+        "display_name": profile.display_name,
+        "age": profile.age,
+        "about": profile.about,
+        "location": profile.location,
+    })
+
     allowed_fields = {"display_name", "age", "about", "location"}
 
+    # Применяем патч
     for name, value in fields.items():
         if name not in allowed_fields:
+            print("Skipping unknown field:", name)
             continue
+        print(f"SET {name} = {value}")
         setattr(profile, name, value)
 
+    print("VALUES BEFORE COMMIT:", {
+        "display_name": profile.display_name,
+        "age": profile.age,
+        "about": profile.about,
+        "location": profile.location,
+    })
+
     await db.commit()
-    await db.refresh(user)
-    return user
+    print("COMMIT DONE")
+
+    # Проверка: читаем профиль заново из базы
+    refreshed_user = await db.get(User, user.id)
+    await db.refresh(refreshed_user, ["profile"])
+
+    print("VALUES AFTER REFRESH (DB STATE):", {
+        "display_name": refreshed_user.profile.display_name,
+        "age": refreshed_user.profile.age,
+        "about": refreshed_user.profile.about,
+        "location": refreshed_user.profile.location,
+    })
+    print("=== END update_profile() ===\n")
+
+    return refreshed_user
+
 
 
 async def revoke_all_sessions_for_user(

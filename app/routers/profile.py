@@ -40,22 +40,11 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
-    # Берёт только реально переданные поля (без unset),
-    # но сохраняет явные null (если клиент прислал "about": null).
+    print("=== UPDATE PROFILE REQUEST ===")
+    print("RAW PAYLOAD:", payload.model_dump())
     update_data = payload.model_dump(exclude_unset=True)
-
-    if not update_data:
-        # Клиент ничего не передал – просто вернуть текущий профиль
-        base = UserBase.model_validate(current_user)
-        profile = UserProfile.model_validate(current_user.profile)
-        privacy = UserPrivacySettings.model_validate(current_user.privacy_settings)
-        settings = UserSettings.model_validate(current_user.settings)
-        return UserFullProfile(
-            user=base,
-            profile=profile,
-            privacy=privacy,
-            settings=settings,
-        )
+    print("FIELDS TO UPDATE (exclude_unset=True):", update_data)
+    print("================================")
 
     user = await update_profile(
         db,
@@ -63,16 +52,22 @@ async def update_my_profile(
         **update_data,
     )
 
+    print("=== PROFILE AFTER update_profile ===")
+    print("PROFILE NOW:", {
+        "display_name": user.profile.display_name,
+        "age": user.profile.age,
+        "about": user.profile.about,
+        "location": user.profile.location,
+    })
+    print("====================================")
+
     base = UserBase.model_validate(user)
     profile = UserProfile.model_validate(user.profile)
     privacy = UserPrivacySettings.model_validate(user.privacy_settings)
     settings = UserSettings.model_validate(user.settings)
 
     return UserFullProfile(
-        user=base,
-        profile=profile,
-        privacy=privacy,
-        settings=settings,
+        user=base, profile=profile, privacy=privacy, settings=settings
     )
 
 @router.post(
