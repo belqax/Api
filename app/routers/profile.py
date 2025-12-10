@@ -40,15 +40,27 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
-    data = payload.model_dump(exclude_unset=True)
+    # Берёт только реально переданные поля (без unset),
+    # но сохраняет явные null (если клиент прислал "about": null).
+    update_data = payload.model_dump(exclude_unset=True)
+
+    if not update_data:
+        # Клиент ничего не передал – просто вернуть текущий профиль
+        base = UserBase.model_validate(current_user)
+        profile = UserProfile.model_validate(current_user.profile)
+        privacy = UserPrivacySettings.model_validate(current_user.privacy_settings)
+        settings = UserSettings.model_validate(current_user.settings)
+        return UserFullProfile(
+            user=base,
+            profile=profile,
+            privacy=privacy,
+            settings=settings,
+        )
 
     user = await update_profile(
         db,
         current_user,
-        display_name=data.get("display_name"),
-        age=data.get("age"),
-        about=data.get("about"),
-        location=data.get("location"),
+        **update_data,
     )
 
     base = UserBase.model_validate(user)

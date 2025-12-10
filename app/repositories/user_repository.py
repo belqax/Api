@@ -188,10 +188,11 @@ async def update_profile(
     **fields: Any,
 ) -> User:
     """
-    Обновляет только те поля профиля, которые реально переданы в **fields.
-    Если значение поля None, то оно очищает поле в БД.
-    Поля, которых нет в fields, не трогает.
+    Обновляет только те поля профиля, которые переданы в `fields`.
+    Поля, которых нет в словаре, не трогает вообще.
     """
+
+    # Гарантирует, что у пользователя есть профиль
     if user.profile is None:
         profile = UserProfile(user_id=user.id)
         db.add(profile)
@@ -200,12 +201,13 @@ async def update_profile(
 
     profile = user.profile
 
-    # Перебирает только реально переданные поля
-    for field_name, value in fields.items():
-        # Игнорирует неизвестные поля на всякий случай
-        if not hasattr(profile, field_name):
+    # Применяет только реально переданные поля
+    allowed_fields = {"display_name", "age", "about", "location"}
+
+    for name, value in fields.items():
+        if name not in allowed_fields:
             continue
-        setattr(profile, field_name, value)
+        setattr(profile, name, value)
 
     await db.commit()
     await db.refresh(user)

@@ -85,10 +85,14 @@ class UserRefreshRequest(BaseModel):
 
 
 class UserProfileUpdateRequest(BaseModel):
-    display_name: Optional[str] = None
-    age: Optional[int] = Field(default=None, ge=0, le=120)
-    about: Optional[str] = None
-    location: Optional[str] = None
+    display_name: Optional[str] = Field(default=None)
+    age: Optional[int] = Field(default=None)
+    about: Optional[str] = Field(default=None)
+    location: Optional[str] = Field(default=None)
+
+    model_config = {
+        "extra": "forbid",
+    }
 
 
 class ResendVerificationEmailRequest(BaseModel):
