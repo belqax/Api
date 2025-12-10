@@ -1,5 +1,5 @@
 import datetime as dt
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -185,26 +185,28 @@ async def revoke_session(
 async def update_profile(
     db: AsyncSession,
     user: User,
-    *,
-    display_name: Optional[str],
-    age: Optional[int],
-    about: Optional[str],
-    location: Optional[str],
+    **fields: Any,
 ) -> User:
+    """
+    Обновляет только те поля профиля, которые реально переданы в **fields.
+    Если значение поля None, то оно очищает поле в БД.
+    Поля, которых нет в fields, не трогает.
+    """
     if user.profile is None:
         profile = UserProfile(user_id=user.id)
         db.add(profile)
         await db.flush()
         await db.refresh(user)
+
     profile = user.profile
-    if display_name is not None:
-        profile.display_name = display_name
-    if age is not None:
-        profile.age = age
-    if about is not None:
-        profile.about = about
-    if location is not None:
-        profile.location = location
+
+    # Перебирает только реально переданные поля
+    for field_name, value in fields.items():
+        # Игнорирует неизвестные поля на всякий случай
+        if not hasattr(profile, field_name):
+            continue
+        setattr(profile, field_name, value)
+
     await db.commit()
     await db.refresh(user)
     return user
