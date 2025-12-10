@@ -185,60 +185,90 @@ async def revoke_session(
 async def update_profile(
     db: AsyncSession,
     user: User,
-    **fields: Any,
+    *,
+    display_name: Optional[str],
+    age: Optional[int],
+    about: Optional[str],
+    location: Optional[str],
 ) -> User:
-    print("\n=== update_profile() CALLED ===")
-    print("FIELDS RECEIVED:", fields)
+    """
+    Обновляет профиль пользователя:
+    - гарантирует, что у юзера есть ровно один UserProfile;
+    - обновляет только те поля, которые не None;
+    - не падает, если user.profile — InstrumentedList.
+    """
 
-    if user.profile is None:
-        print("No profile found -> creating new UserProfile")
+    # Нормализует user.profile к одному объекту UserProfile
+    raw_profile = user.profile
+
+    profile: Optional[UserProfile]
+
+    if isinstance(raw_profile, InstrumentedList):
+        # связь настроена как коллекция; берёт первый элемент, либо создаёт новый
+        if raw_profile:
+            profile = raw_profile[0]
+        else:
+            profile = None
+    else:
+        profile = raw_profile
+
+    if profile is None:
+        # Профиля нет вообще → создаёт
         profile = UserProfile(user_id=user.id)
         db.add(profile)
         await db.flush()
         await db.refresh(user)
-    profile = user.profile
 
-    # Показать старые значения
-    print("OLD VALUES:", {
-        "display_name": profile.display_name,
-        "age": profile.age,
-        "about": profile.about,
-        "location": profile.location,
+        # После refresh связь могла обновиться
+        raw_profile = user.profile
+        if isinstance(raw_profile, InstrumentedList):
+            if raw_profile and raw_profile[0] is not profile:
+                # Добавляет созданный профиль в коллекцию, если нужно
+                raw_profile.append(profile)
+        else:
+            user.profile = profile  # на случай однообъектной связи
+
+    # На этом этапе profile — точно UserProfile
+    # Логирует входящие значения, не трогая сам профиль
+    print("update_profile: user_id=", user.id, "payload=", {
+        "display_name": display_name,
+        "age": age,
+        "about": about,
+        "location": location,
     })
 
-    allowed_fields = {"display_name", "age", "about", "location"}
-
-    # Применяем патч
-    for name, value in fields.items():
-        if name not in allowed_fields:
-            print("Skipping unknown field:", name)
-            continue
-        print(f"SET {name} = {value}")
-        setattr(profile, name, value)
-
-    print("VALUES BEFORE COMMIT:", {
-        "display_name": profile.display_name,
-        "age": profile.age,
-        "about": profile.about,
-        "location": profile.location,
-    })
+    if display_name is not None:
+        profile.display_name = display_name
+    if age is not None:
+        profile.age = age
+    if about is not None:
+        profile.about = about
+    if location is not None:
+        profile.location = location
 
     await db.commit()
-    print("COMMIT DONE")
+    await db.refresh(user)
 
-    # Проверка: читаем профиль заново из базы
-    refreshed_user = await db.get(User, user.id)
-    await db.refresh(refreshed_user, ["profile"])
+    # Аккуратный лог текущего состояния профиля
+    try:
+        normalized_profile = user.profile
+        if isinstance(normalized_profile, InstrumentedList):
+            normalized_profile = normalized_profile[0] if normalized_profile else None
 
-    print("VALUES AFTER REFRESH (DB STATE):", {
-        "display_name": refreshed_user.profile.display_name,
-        "age": refreshed_user.profile.age,
-        "about": refreshed_user.profile.about,
-        "location": refreshed_user.profile.location,
-    })
-    print("=== END update_profile() ===\n")
+        if normalized_profile is not None:
+            print("update_profile: saved profile for user_id=", user.id, "=>", {
+                "display_name": normalized_profile.display_name,
+                "age": normalized_profile.age,
+                "about": normalized_profile.about,
+                "location": normalized_profile.location,
+            })
+        else:
+            print("update_profile: WARNING: profile is still None for user_id=", user.id)
+    except Exception as e:
+        # Логирует, но не ломает запрос
+        print("update_profile: error while logging final profile:", repr(e))
 
-    return refreshed_user
+    return user
 
 
 
