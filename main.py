@@ -2,18 +2,26 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import engine
 from app.middleware.ip_rate_limit import IPRateLimitMiddleware
 from app.models import Base
 from app.routers import auth, profile, animals, feed, matches, addresses, likes
+from app.services.media import MEDIA_ROOT
 
 settings = get_settings()
 
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
+)
+
+app.mount(
+    "/media",
+    StaticFiles(directory=MEDIA_ROOT),
+    name="media",
 )
 
 app.add_middleware(
