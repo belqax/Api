@@ -1,9 +1,11 @@
 import datetime as dt
+import logging
 from typing import Optional, Any, Coroutine
 from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import User
 from ..models import (
@@ -16,6 +18,7 @@ from ..models import (
 )
 from ..security import hash_refresh_token
 
+logger = logging.getLogger(__name__)
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
@@ -102,25 +105,6 @@ async def upsert_device(
     await db.refresh(device)
     return device
 
-async def update_user_avatar(
-    db: AsyncSession,
-    user: User,
-    *,
-    avatar_url: Optional[str],
-) -> User:
-    if user.profile is None:
-        profile = UserProfile(user_id=user.id)
-        db.add(profile)
-        await db.flush()
-        await db.refresh(user)
-
-    profile = user.profile
-    profile.avatar_url = avatar_url
-
-    await db.commit()
-    await db.refresh(user)
-    return user
-
 async def create_session(
     db: AsyncSession,
     *,
@@ -182,50 +166,151 @@ async def revoke_session(
     session.revoke_reason = reason
     await db.commit()
 
+async def _load_user_with_profile(
+    db: AsyncSession,
+    user_id: int,
+) -> User:
+    """
+    Загружает пользователя с profile / privacy_settings / settings
+    в контексте текущей сессии.
+    """
+    stmt = (
+        select(User)
+        .options(
+            selectinload(User.profile),
+            selectinload(User.privacy_settings),
+            selectinload(User.settings),
+        )
+        .where(User.id == user_id)
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise ValueError(f"User with id={user_id} not found or inactive")
+
+    return user
+
+
+async def _ensure_profile(
+    db: AsyncSession,
+    user: User,
+) -> UserProfile:
+    """
+    Гарантирует наличие user.profile.
+    При отсутствии создаёт новый профиль и привязывает к пользователю.
+    """
+    if user.profile is not None:
+        return user.profile
+
+    logger.info("Creating profile for user_id=%s", user.id)
+    profile = UserProfile(user_id=user.id)
+    db.add(profile)
+    # Фиксирует появление профиля и обновляет user.profile
+    await db.flush()
+    await db.refresh(user, attribute_names=["profile"])
+
+    return user.profile  # type: ignore[return-value]
+
 
 async def update_profile(
     db: AsyncSession,
-    user: User,
+    user_id: int,
     *,
     display_name: Optional[str] = None,
     age: Optional[int] = None,
     about: Optional[str] = None,
     location: Optional[str] = None,
-) -> type[User] | None:
+) -> User:
     """
-    Обновляет профиль пользователя.
-    - Параметры опциональные: если аргумент не передан, поле не трогает.
-    - Если user.profile отсутствует, создаёт его.
+    Обновляет профиль пользователя по user_id.
+
+    Поведение:
+    - Если параметр равен None → поле не трогает (partial update).
+    - Если у пользователя нет profile → создаёт.
     """
-    user = await db.get(User, user.id)
+    logger.info(
+        "update_profile: user_id=%s payload=%s",
+        user_id,
+        {
+            "display_name": display_name,
+            "age": age,
+            "about": about,
+            "location": location,
+        },
+    )
 
-    if user.profile is None:
-        profile = UserProfile(user_id=user.id)
-        db.add(profile)
-        await db.flush()
-        await db.refresh(user)
-
-    profile = user.profile
+    user = await _load_user_with_profile(db, user_id=user_id)
+    profile = await _ensure_profile(db, user)
 
     if display_name is not None:
         profile.display_name = display_name
+
     if age is not None:
         profile.age = age
+
     if about is not None:
         profile.about = about
+
     if location is not None:
         profile.location = location
 
     await db.commit()
-    await db.refresh(user)
 
-    try:
-        print("update_profile")
-    except Exception as e:
-        print("update_profile: log error:", repr(e))
+    # Обновляет user и связанные сущности для корректного ответа API
+    await db.refresh(
+        user,
+        attribute_names=["profile", "privacy_settings", "settings"],
+    )
+
+    logger.info(
+        "update_profile: saved for user_id=%s => %s",
+        user.id,
+        {
+            "display_name": profile.display_name,
+            "age": profile.age,
+            "about": profile.about,
+            "location": profile.location,
+        },
+    )
 
     return user
 
+
+async def update_user_avatar(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    avatar_url: Optional[str],
+) -> User:
+    """
+    Обновляет avatar_url в профиле пользователя.
+    Если profile отсутствует, создаёт его.
+    """
+    logger.info(
+        "update_user_avatar: user_id=%s avatar_url=%s",
+        user_id,
+        avatar_url,
+    )
+
+    user = await _load_user_with_profile(db, user_id=user_id)
+    profile = await _ensure_profile(db, user)
+
+    profile.avatar_url = avatar_url
+
+    await db.commit()
+    await db.refresh(
+        user,
+        attribute_names=["profile", "privacy_settings", "settings"],
+    )
+
+    logger.info(
+        "update_user_avatar: saved for user_id=%s => avatar_url=%s",
+        user.id,
+        profile.avatar_url,
+    )
+
+    return user
 
 
 async def revoke_all_sessions_for_user(

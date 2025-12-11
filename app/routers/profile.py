@@ -1,135 +1,248 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..deps import get_db, get_current_user
+from ..deps import get_current_user, get_db
 from ..models import User
 from ..schemas import (
     UserBase,
-    UserProfile,
-    UserPrivacySettings,
-    UserSettings,
     UserFullProfile,
+    UserPrivacySettings,
+    UserProfile,
     UserProfileUpdateRequest,
+    UserSettings,
 )
-from ..repositories.user_repository import update_profile, update_user_avatar
-from ..services.media import delete_media_file_by_url, save_user_avatar_file
+from ..repositories.user_repository import (
+    update_profile,
+    update_user_avatar,
+)
+from ..services.media import (
+    delete_media_file_by_url,
+    save_user_avatar_file,
+)
 
-router = APIRouter(prefix="/me", tags=["profile"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/users",
+    tags=["users"],
+)
 
 
-@router.get("", response_model=UserFullProfile)
-async def get_my_profile(
-    current_user: User = Depends(get_current_user),
-) -> UserFullProfile:
-    base = UserBase.model_validate(current_user)
-    profile = UserProfile.model_validate(current_user.profile)
-    privacy = UserPrivacySettings.model_validate(current_user.privacy_settings)
-    settings = UserSettings.model_validate(current_user.settings)
+def _build_full_profile_response(user: User) -> UserFullProfile:
+    """
+    Собирает UserFullProfile из ORM-модели User.
+    Гарантирует, что профиль/настройки всегда есть в ответе.
+    """
+    base = UserBase.model_validate(user)
+
+    profile_model = (
+        UserProfile.model_validate(user.profile)
+        if user.profile is not None
+        else UserProfile()
+    )
+
+    privacy_model = (
+        UserPrivacySettings.model_validate(user.privacy_settings)
+        if user.privacy_settings is not None
+        else UserPrivacySettings()
+    )
+
+    settings_model = (
+        UserSettings.model_validate(user.settings)
+        if user.settings is not None
+        else UserSettings()
+    )
 
     return UserFullProfile(
         user=base,
-        profile=profile,
-        privacy=privacy,
-        settings=settings,
+        profile=profile_model,
+        privacy=privacy_model,
+        settings=settings_model,
     )
 
 
-@router.put("/profile", response_model=UserFullProfile)
+@router.get(
+    "/me",
+    response_model=UserFullProfile,
+    status_code=status.HTTP_200_OK,
+)
+async def get_my_profile(
+    current_user: User = Depends(get_current_user),
+) -> UserFullProfile:
+    """
+    Возвращает текущий профиль пользователя.
+    """
+    return _build_full_profile_response(current_user)
+
+
+@router.put(
+    "/me/profile",
+    response_model=UserFullProfile,
+    status_code=status.HTTP_200_OK,
+)
 async def update_my_profile(
     payload: UserProfileUpdateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
+    """
+    Частично обновляет профиль текущего пользователя.
 
-    update_data = payload.model_dump(exclude_unset=True)
+    Обновляет только поля, которые реально переданы (exclude_unset=True).
+    """
+    update_data: dict[str, Any] = payload.model_dump(exclude_unset=True)
 
-    user = await update_profile(
-        db,
-        current_user,
-        **update_data,
+    logger.info(
+        "UPDATE PROFILE REQUEST: user_id=%s raw=%s fields=%s",
+        current_user.id,
+        payload.model_dump(),
+        update_data,
     )
 
-    base = UserBase.model_validate(user)
-    profile = UserProfile.model_validate(user.profile)
-    privacy = UserPrivacySettings.model_validate(user.privacy_settings)
-    settings = UserSettings.model_validate(user.settings)
+    if not update_data:
+        # Нечего обновлять: просто вернёт текущий профиль
+        return _build_full_profile_response(current_user)
 
-    return UserFullProfile(
-        user=base, profile=profile, privacy=privacy, settings=settings
-    )
+    try:
+        user = await update_profile(
+            db,
+            user_id=current_user.id,
+            **update_data,
+        )
+    except ValueError as e:
+        logger.warning(
+            "update_my_profile: user not found or inactive: %s", e
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        ) from e
+
+    return _build_full_profile_response(user)
+
 
 @router.post(
-    "/avatar",
+    "/me/avatar",
     response_model=UserFullProfile,
-    summary="Upload or replace my avatar",
+    status_code=status.HTTP_200_OK,
 )
-async def upload_my_avatar(
+async def upload_avatar(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
-    # Сохраняет новый файл
-    new_url = await save_user_avatar_file(
-        owner_user_id=current_user.id,
-        file=file,
+    """
+    Заменяет аватар пользователя на новый файл.
+    Старый файл удаляет из хранилища, если он был.
+    """
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Требуется файл изображения",
+        )
+
+    old_avatar_url = (
+        current_user.profile.avatar_url
+        if current_user.profile is not None
+        else None
     )
 
-    # Если была старая аватарка — удаляет
-    old_url = current_user.profile.avatar_url if current_user.profile else None
-    if old_url:
-        delete_media_file_by_url(old_url)
+    # Сохраняет новый файл в хранилище и получает URL
+    try:
+        new_avatar_url = await save_user_avatar_file(
+            user_id=current_user.id,
+            file=file,
+        )
+    except Exception as e:
+        logger.exception("Failed to save avatar file: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось сохранить аватар",
+        ) from e
 
-    user = await update_user_avatar(
-        db,
-        user=current_user,
-        avatar_url=new_url,
-    )
+    # Обновляет профиль в базе
+    try:
+        user = await update_user_avatar(
+            db,
+            user_id=current_user.id,
+            avatar_url=new_avatar_url,
+        )
+    except ValueError as e:
+        logger.warning(
+            "upload_avatar: user not found or inactive: %s", e
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        ) from e
 
-    base = UserBase.model_validate(user)
-    profile = UserProfile.model_validate(user.profile)
-    privacy = UserPrivacySettings.model_validate(user.privacy_settings)
-    settings = UserSettings.model_validate(user.settings)
+    # Пытается удалить старый файл (ошибки не считаются критичными)
+    if old_avatar_url and old_avatar_url != new_avatar_url:
+        try:
+            await delete_media_file_by_url(old_avatar_url)
+        except Exception as e:
+            logger.warning(
+                "Failed to delete old avatar file '%s': %s",
+                old_avatar_url,
+                e,
+            )
 
-    return UserFullProfile(
-        user=base,
-        profile=profile,
-        privacy=privacy,
-        settings=settings,
-    )
+    return _build_full_profile_response(user)
 
 
 @router.delete(
-    "/avatar",
+    "/me/avatar",
     response_model=UserFullProfile,
-    summary="Delete my avatar",
+    status_code=status.HTTP_200_OK,
 )
-async def delete_my_avatar(
-    current_user: User = Depends(get_current_user),
+async def delete_avatar(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
-    old_url = current_user.profile.avatar_url if current_user.profile else None
-    if not old_url:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Avatar is not set",
+    """
+    Удаляет аватар пользователя и очищает avatar_url в профиле.
+    """
+    old_avatar_url = (
+        current_user.profile.avatar_url
+        if current_user.profile is not None
+        else None
+    )
+
+    try:
+        user = await update_user_avatar(
+            db,
+            user_id=current_user.id,
+            avatar_url=None,
         )
+    except ValueError as e:
+        logger.warning(
+            "delete_avatar: user not found or inactive: %s", e
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        ) from e
 
-    delete_media_file_by_url(old_url)
+    if old_avatar_url:
+        try:
+            await delete_media_file_by_url(old_avatar_url)
+        except Exception as e:
+            logger.warning(
+                "Failed to delete old avatar file '%s': %s",
+                old_avatar_url,
+                e,
+            )
 
-    user = await update_user_avatar(
-        db,
-        user=current_user,
-        avatar_url=None,
-    )
-
-    base = UserBase.model_validate(user)
-    profile = UserProfile.model_validate(user.profile)
-    privacy = UserPrivacySettings.model_validate(user.privacy_settings)
-    settings = UserSettings.model_validate(user.settings)
-
-    return UserFullProfile(
-        user=base,
-        profile=profile,
-        privacy=privacy,
-        settings=settings,
-    )
+    return _build_full_profile_response(user)
