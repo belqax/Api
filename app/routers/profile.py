@@ -40,26 +40,14 @@ async def update_my_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
-    print("=== UPDATE PROFILE REQUEST ===")
-    print("RAW PAYLOAD:", payload.model_dump())
+
     update_data = payload.model_dump(exclude_unset=True)
-    print("FIELDS TO UPDATE (exclude_unset=True):", update_data)
-    print("================================")
 
     user = await update_profile(
         db,
         current_user,
         **update_data,
     )
-
-    print("=== PROFILE AFTER update_profile ===")
-    print("PROFILE NOW:", {
-        "display_name": user.profile.display_name,
-        "age": user.profile.age,
-        "about": user.profile.about,
-        "location": user.profile.location,
-    })
-    print("====================================")
 
     base = UserBase.model_validate(user)
     profile = UserProfile.model_validate(user.profile)

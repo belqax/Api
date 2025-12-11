@@ -1,11 +1,11 @@
 import datetime as dt
-from typing import Optional, Any
+from typing import Optional, Any, Coroutine
 from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.collections import InstrumentedList
 
+from app.models import User
 from ..models import (
     User,
     UserProfile,
@@ -191,12 +191,13 @@ async def update_profile(
     age: Optional[int] = None,
     about: Optional[str] = None,
     location: Optional[str] = None,
-) -> User:
+) -> type[User] | None:
     """
     Обновляет профиль пользователя.
     - Параметры опциональные: если аргумент не передан, поле не трогает.
     - Если user.profile отсутствует, создаёт его.
     """
+    user = await db.get(User, user.id)
 
     if user.profile is None:
         profile = UserProfile(user_id=user.id)
@@ -205,18 +206,6 @@ async def update_profile(
         await db.refresh(user)
 
     profile = user.profile
-
-    # Лог (по желанию, безопасный — не ломает выполнение)
-    print(
-        "update_profile: user_id=", user.id,
-        "payload=",
-        {
-            "display_name": display_name,
-            "age": age,
-            "about": about,
-            "location": location,
-        },
-    )
 
     if display_name is not None:
         profile.display_name = display_name
@@ -231,16 +220,7 @@ async def update_profile(
     await db.refresh(user)
 
     try:
-        print(
-            "update_profile: saved profile for user_id=", user.id,
-            "=>",
-            {
-                "display_name": profile.display_name,
-                "age": profile.age,
-                "about": profile.about,
-                "location": profile.location,
-            },
-        )
+        print("update_profile")
     except Exception as e:
         print("update_profile: log error:", repr(e))
 
