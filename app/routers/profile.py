@@ -152,7 +152,7 @@ async def upload_avatar(
 
     try:
         new_avatar_url = await save_user_avatar_file(
-            user_id=current_user.id,
+            owner_user_id=current_user.id,
             file=file,
         )
     except Exception as e:
