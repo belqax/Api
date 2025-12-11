@@ -19,7 +19,7 @@ ECHO_SQL: bool = _settings.debug
 
 engine: AsyncEngine = create_async_engine(
     DATABASE_URL,
-    echo=ECHO_SQL,
+    echo=True,
 )
 
 SessionFactory: async_sessionmaker[AsyncSession] = async_sessionmaker(

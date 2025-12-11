@@ -27,10 +27,7 @@ from ..repositories.user_repository import (
     update_profile,
     update_user_avatar,
 )
-from ..services.media import (
-    delete_media_file_by_url,
-    save_user_avatar_file,
-)
+from ..services.media import delete_media_file_by_url, save_user_avatar_file
 
 logger = logging.getLogger(__name__)
 
@@ -40,26 +37,25 @@ router = APIRouter(
 )
 
 
-def _build_full_profile_response(user: User) -> UserFullProfile:
+def build_full_profile_response(user: User) -> UserFullProfile:
     """
     Собирает UserFullProfile из ORM-модели User.
-    Гарантирует, что профиль/настройки всегда есть в ответе.
     """
     base = UserBase.model_validate(user)
 
-    profile_model = (
+    profile = (
         UserProfile.model_validate(user.profile)
         if user.profile is not None
         else UserProfile()
     )
 
-    privacy_model = (
+    privacy = (
         UserPrivacySettings.model_validate(user.privacy_settings)
         if user.privacy_settings is not None
         else UserPrivacySettings()
     )
 
-    settings_model = (
+    settings = (
         UserSettings.model_validate(user.settings)
         if user.settings is not None
         else UserSettings()
@@ -67,9 +63,9 @@ def _build_full_profile_response(user: User) -> UserFullProfile:
 
     return UserFullProfile(
         user=base,
-        profile=profile_model,
-        privacy=privacy_model,
-        settings=settings_model,
+        profile=profile,
+        privacy=privacy,
+        settings=settings,
     )
 
 
@@ -82,9 +78,9 @@ async def get_my_profile(
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
     """
-    Возвращает текущий профиль пользователя.
+    Возвращает профиль текущего пользователя.
     """
-    return _build_full_profile_response(current_user)
+    return build_full_profile_response(current_user)
 
 
 @router.put(
@@ -99,21 +95,16 @@ async def update_my_profile(
 ) -> UserFullProfile:
     """
     Частично обновляет профиль текущего пользователя.
-
-    Обновляет только поля, которые реально переданы (exclude_unset=True).
     """
+    raw_data = payload.model_dump()
     update_data: dict[str, Any] = payload.model_dump(exclude_unset=True)
 
     logger.info(
-        "UPDATE PROFILE REQUEST: user_id=%s raw=%s fields=%s",
+        "UPDATE PROFILE REQUEST: user_id=%s raw=%s update_fields=%s",
         current_user.id,
-        payload.model_dump(),
+        raw_data,
         update_data,
     )
-
-    if not update_data:
-        # Нечего обновлять: просто вернёт текущий профиль
-        return _build_full_profile_response(current_user)
 
     try:
         user = await update_profile(
@@ -123,14 +114,15 @@ async def update_my_profile(
         )
     except ValueError as e:
         logger.warning(
-            "update_my_profile: user not found or inactive: %s", e
+            "update_my_profile(): user not found or inactive: %s",
+            e,
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         ) from e
 
-    return _build_full_profile_response(user)
+    return build_full_profile_response(user)
 
 
 @router.post(
@@ -144,8 +136,7 @@ async def upload_avatar(
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
     """
-    Заменяет аватар пользователя на новый файл.
-    Старый файл удаляет из хранилища, если он был.
+    Загружает новый аватар, обновляет profile.avatar_url и удаляет старый файл.
     """
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -159,20 +150,18 @@ async def upload_avatar(
         else None
     )
 
-    # Сохраняет новый файл в хранилище и получает URL
     try:
         new_avatar_url = await save_user_avatar_file(
             user_id=current_user.id,
             file=file,
         )
     except Exception as e:
-        logger.exception("Failed to save avatar file: %s", e)
+        logger.exception("upload_avatar(): failed to save avatar: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Не удалось сохранить аватар",
         ) from e
 
-    # Обновляет профиль в базе
     try:
         user = await update_user_avatar(
             db,
@@ -181,25 +170,24 @@ async def upload_avatar(
         )
     except ValueError as e:
         logger.warning(
-            "upload_avatar: user not found or inactive: %s", e
+            "upload_avatar(): user not found or inactive: %s", e
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         ) from e
 
-    # Пытается удалить старый файл (ошибки не считаются критичными)
     if old_avatar_url and old_avatar_url != new_avatar_url:
         try:
             await delete_media_file_by_url(old_avatar_url)
         except Exception as e:
             logger.warning(
-                "Failed to delete old avatar file '%s': %s",
+                "upload_avatar(): failed to delete old avatar '%s': %s",
                 old_avatar_url,
                 e,
             )
 
-    return _build_full_profile_response(user)
+    return build_full_profile_response(user)
 
 
 @router.delete(
@@ -212,7 +200,7 @@ async def delete_avatar(
     current_user: User = Depends(get_current_user),
 ) -> UserFullProfile:
     """
-    Удаляет аватар пользователя и очищает avatar_url в профиле.
+    Очищает avatar_url и удаляет файл аватара, если он был.
     """
     old_avatar_url = (
         current_user.profile.avatar_url
@@ -228,7 +216,7 @@ async def delete_avatar(
         )
     except ValueError as e:
         logger.warning(
-            "delete_avatar: user not found or inactive: %s", e
+            "delete_avatar(): user not found or inactive: %s", e
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -240,9 +228,9 @@ async def delete_avatar(
             await delete_media_file_by_url(old_avatar_url)
         except Exception as e:
             logger.warning(
-                "Failed to delete old avatar file '%s': %s",
+                "delete_avatar(): failed to delete old avatar '%s': %s",
                 old_avatar_url,
                 e,
             )
 
-    return _build_full_profile_response(user)
+    return build_full_profile_response(user)

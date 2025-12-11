@@ -213,6 +213,34 @@ async def _ensure_profile(
     return user.profile  # type: ignore[return-value]
 
 
+async def load_user_with_all_relations(
+    db: AsyncSession,
+    user_id: int,
+) -> User:
+    """
+    Загружает пользователя с profile / privacy_settings / settings в текущей сессии.
+    """
+    stmt = (
+        select(User)
+        .options(
+            selectinload(User.profile),
+            selectinload(User.privacy_settings),
+            selectinload(User.settings),
+        )
+        .where(User.id == user_id)
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise ValueError(f"User with id={user_id} not found or inactive")
+
+    return user
+
+
+# ===================== ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ =====================
+
+
 async def update_profile(
     db: AsyncSession,
     user_id: int,
@@ -225,56 +253,84 @@ async def update_profile(
     """
     Обновляет профиль пользователя по user_id.
 
-    Поведение:
-    - Если параметр равен None → поле не трогает (partial update).
-    - Если у пользователя нет profile → создаёт.
+    ЛОГИКА:
+    - Собирает словарь полей, которые реально переданы (partial update).
+    - Если профиля нет → делает INSERT.
+    - Если профиль есть → делает явный UPDATE по user_id.
+    - После коммита перегружает пользователя с привязанными сущностями.
     """
+    payload: dict[str, Any] = {
+        "display_name": display_name,
+        "age": age,
+        "about": about,
+        "location": location,
+    }
+    # Оставляет только реально переданные значения (не None)
+    update_fields = {k: v for k, v in payload.items() if v is not None}
+
     logger.info(
-        "update_profile: user_id=%s payload=%s",
+        "update_profile(): user_id=%s raw=%s update_fields=%s",
         user_id,
-        {
-            "display_name": display_name,
-            "age": age,
-            "about": about,
-            "location": location,
-        },
+        payload,
+        update_fields,
     )
 
-    user = await _load_user_with_profile(db, user_id=user_id)
-    profile = await _ensure_profile(db, user)
+    # Если нечего обновлять, просто возвращает актуального пользователя
+    if not update_fields:
+        user = await load_user_with_all_relations(db, user_id=user_id)
+        return user
 
-    if display_name is not None:
-        profile.display_name = display_name
+    # Проверяет, существует ли профиль
+    result = await db.execute(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    )
+    profile = result.scalar_one_or_none()
 
-    if age is not None:
-        profile.age = age
+    now = dt.datetime.now(dt.timezone.utc)
 
-    if about is not None:
-        profile.about = about
+    if profile is None:
+        # Вставляет новый профиль
+        logger.info("update_profile(): creating new profile for user_id=%s", user_id)
 
-    if location is not None:
-        profile.location = location
+        new_profile = UserProfile(
+            user_id=user_id,
+            **update_fields,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(new_profile)
+    else:
+        # Делает явный UPDATE (без зависимости от ORM-статуса инстанса)
+        logger.info("update_profile(): updating existing profile for user_id=%s", user_id)
+
+        update_fields["updated_at"] = now
+
+        await db.execute(
+            update(UserProfile)
+            .where(UserProfile.user_id == user_id)
+            .values(**update_fields)
+        )
 
     await db.commit()
 
-    # Обновляет user и связанные сущности для корректного ответа API
-    await db.refresh(
-        user,
-        attribute_names=["profile", "privacy_settings", "settings"],
-    )
+    # Перегружает пользователя целиком
+    user = await load_user_with_all_relations(db, user_id=user_id)
 
     logger.info(
-        "update_profile: saved for user_id=%s => %s",
-        user.id,
+        "update_profile(): saved for user_id=%s => profile=%s",
+        user_id,
         {
-            "display_name": profile.display_name,
-            "age": profile.age,
-            "about": profile.about,
-            "location": profile.location,
+            "display_name": user.profile.display_name if user.profile else None,
+            "age": user.profile.age if user.profile else None,
+            "about": user.profile.about if user.profile else None,
+            "location": user.profile.location if user.profile else None,
         },
     )
 
     return user
+
+
+# ===================== АВАТАР ПОЛЬЗОВАТЕЛЯ =====================
 
 
 async def update_user_avatar(
@@ -285,33 +341,54 @@ async def update_user_avatar(
 ) -> User:
     """
     Обновляет avatar_url в профиле пользователя.
-    Если profile отсутствует, создаёт его.
+    Если профиля нет, создаёт его.
     """
     logger.info(
-        "update_user_avatar: user_id=%s avatar_url=%s",
+        "update_user_avatar(): user_id=%s avatar_url=%s",
         user_id,
         avatar_url,
     )
 
-    user = await _load_user_with_profile(db, user_id=user_id)
-    profile = await _ensure_profile(db, user)
+    # Проверяет, существует ли профиль
+    result = await db.execute(
+        select(UserProfile).where(UserProfile.user_id == user_id)
+    )
+    profile = result.scalar_one_or_none()
 
-    profile.avatar_url = avatar_url
+    now = dt.datetime.now(dt.timezone.utc)
+
+    if profile is None:
+        logger.info(
+            "update_user_avatar(): creating new profile for user_id=%s", user_id
+        )
+        new_profile = UserProfile(
+            user_id=user_id,
+            avatar_url=avatar_url,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(new_profile)
+    else:
+        await db.execute(
+            update(UserProfile)
+            .where(UserProfile.user_id == user_id)
+            .values(
+                avatar_url=avatar_url,
+                updated_at=now,
+            )
+        )
 
     await db.commit()
-    await db.refresh(
-        user,
-        attribute_names=["profile", "privacy_settings", "settings"],
-    )
+
+    user = await load_user_with_all_relations(db, user_id=user_id)
 
     logger.info(
-        "update_user_avatar: saved for user_id=%s => avatar_url=%s",
-        user.id,
-        profile.avatar_url,
+        "update_user_avatar(): saved for user_id=%s => avatar_url=%s",
+        user_id,
+        user.profile.avatar_url if user.profile else None,
     )
 
     return user
-
 
 async def revoke_all_sessions_for_user(
     db: AsyncSession,
