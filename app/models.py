@@ -46,9 +46,26 @@ class User(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
-    profile = relationship("UserProfile", back_populates="user", lazy="selectin")
-    privacy_settings = relationship("UserPrivacySettings", back_populates="user", lazy="selectin")
-    settings = relationship("UserSettings", back_populates="user", lazy="selectin")
+    profile: Mapped[Optional["UserProfile"]] = relationship(
+        "UserProfile",
+        back_populates="user",
+        lazy="selectin",
+        uselist=False,
+    )
+
+    privacy_settings: Mapped[Optional["UserPrivacySettings"]] = relationship(
+        "UserPrivacySettings",
+        back_populates="user",
+        lazy="selectin",
+        uselist=False,
+    )
+
+    settings: Mapped[Optional["UserSettings"]] = relationship(
+        "UserSettings",
+        back_populates="user",
+        lazy="selectin",
+        uselist=False,
+    )
     devices: Mapped[List["UserDevice"]] = relationship(back_populates="user")
     sessions: Mapped[List["UserSession"]] = relationship(back_populates="user")
     animals: Mapped[List["Animal"]] = relationship(back_populates="owner")
