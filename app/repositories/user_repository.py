@@ -248,6 +248,15 @@ async def update_profile(
     display_name: Optional[str] = None,
     age: Optional[int] = None,
     about: Optional[str] = None,
+    location_formatted: Optional[str] = None,
+    location_city: Optional[str] = None,
+    location_state: Optional[str] = None,
+    location_country: Optional[str] = None,
+    location_postcode: Optional[str] = None,
+    location_lat: Optional[str] = None,
+    location_lon: Optional[str] = None,
+    location_result_type: Optional[str] = None,
+    location_confidence: Optional[str] = None
 ) -> User:
     """
     Обновляет профиль пользователя по user_id.
@@ -261,7 +270,16 @@ async def update_profile(
     payload: dict[str, Any] = {
         "display_name": display_name,
         "age": age,
-        "about": about
+        "about": about,
+        "location_formatted": location_formatted,
+        "location_city": location_city,
+        "location_state": location_state,
+        "location_country": location_country,
+        "location_postcode": location_postcode,
+        "location_lat": location_lat,
+        "location_lon": location_lon,
+        "location_result_type": location_result_type,
+        "location_confidence": location_confidence,
     }
     # Оставляет только реально переданные значения (не None)
     update_fields = {k: v for k, v in payload.items() if v is not None}

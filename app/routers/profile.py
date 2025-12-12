@@ -96,15 +96,7 @@ async def update_my_profile(
     """
     Частично обновляет профиль текущего пользователя.
     """
-    raw_data = payload.model_dump()
     update_data: dict[str, Any] = payload.model_dump(exclude_unset=True)
-
-    logger.info(
-        "UPDATE PROFILE REQUEST: user_id=%s raw=%s update_fields=%s",
-        current_user.id,
-        raw_data,
-        update_data,
-    )
 
     try:
         user = await update_profile(
