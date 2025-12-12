@@ -115,6 +115,34 @@ class UserProfileUpdateRequest(BaseModel):
         "extra": "forbid",
     }
 
+class UserPrivacyUpdateRequest(BaseModel):
+    profile_visibility: Optional[str] = None
+    photos_visibility: Optional[str] = None
+    online_status_visibility: Optional[str] = None
+    last_seen_precision: Optional[str] = None
+
+    show_age: Optional[bool] = None
+    show_distance: Optional[bool] = None
+
+    model_config = {
+        "extra": "forbid",
+    }
+
+
+class UserSettingsUpdateRequest(BaseModel):
+    language_code: Optional[str] = Field(default=None, max_length=16)
+    timezone: Optional[str] = Field(default=None, max_length=64)
+
+    biometric_login_enabled: Optional[bool] = None
+
+    push_enabled: Optional[bool] = None
+    push_new_messages: Optional[bool] = None
+    push_events: Optional[bool] = None
+    push_news: Optional[bool] = None
+
+    model_config = {
+        "extra": "forbid",
+    }
 
 class ResendVerificationEmailRequest(BaseModel):
     email: EmailStr

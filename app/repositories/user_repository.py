@@ -322,6 +322,100 @@ async def update_profile(
     user = await load_user_with_all_relations(db, user_id=user_id)
     return user
 
+# user_repository.py
+
+async def update_user_privacy_settings(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    updates: dict[str, Any],
+) -> User:
+    """
+    Частично обновляет privacy_settings пользователя.
+
+    ЛОГИКА:
+    - Обновляет только реально переданные поля
+    - Гарантирует наличие записи в user_privacy_settings
+    - После коммита возвращает пользователя со всеми связями
+    """
+
+    if not updates:
+        return await load_user_with_all_relations(db, user_id=user_id)
+
+    result = await db.execute(
+        select(UserPrivacySettings).where(
+            UserPrivacySettings.user_id == user_id
+        )
+    )
+    privacy = result.scalar_one_or_none()
+
+    now = dt.datetime.now(dt.timezone.utc)
+
+    if privacy is None:
+        privacy = UserPrivacySettings(
+            user_id=user_id,
+            **updates,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(privacy)
+    else:
+        updates["updated_at"] = now
+        await db.execute(
+            update(UserPrivacySettings)
+            .where(UserPrivacySettings.user_id == user_id)
+            .values(**updates)
+        )
+
+    await db.commit()
+
+    return await load_user_with_all_relations(db, user_id=user_id)
+
+
+
+async def update_user_settings(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    updates: dict[str, Any],
+) -> User:
+    """
+    Частично обновляет settings пользователя.
+
+    ЛОГИКА:
+    - Обновляет только реально переданные поля
+    - Гарантирует наличие записи в user_settings
+    - После коммита возвращает пользователя со всеми связями
+    """
+    if not updates:
+        return await load_user_with_all_relations(db, user_id=user_id)
+
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+
+    now = dt.datetime.now(dt.timezone.utc)
+
+    if settings is None:
+        settings = UserSettings(
+            user_id=user_id,
+            **updates,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(settings)
+    else:
+        updates["updated_at"] = now
+        await db.execute(
+            update(UserSettings)
+            .where(UserSettings.user_id == user_id)
+            .values(**updates)
+        )
+
+    await db.commit()
+
+    return await load_user_with_all_relations(db, user_id=user_id)
 
 # ===================== АВАТАР ПОЛЬЗОВАТЕЛЯ =====================
 

@@ -21,11 +21,11 @@ from ..schemas import (
     UserPrivacySettings,
     UserProfile,
     UserProfileUpdateRequest,
-    UserSettings,
+    UserSettings, UserPrivacyUpdateRequest, UserSettingsUpdateRequest,
 )
 from ..repositories.user_repository import (
     update_profile,
-    update_user_avatar,
+    update_user_avatar, update_user_privacy_settings, update_user_settings,
 )
 from ..services.media import delete_media_file_by_url, save_user_avatar_file
 
@@ -116,6 +116,54 @@ async def update_my_profile(
 
     return build_full_profile_response(user)
 
+
+@router.patch(
+    "/me/privacy",
+    response_model=UserFullProfile,
+    status_code=status.HTTP_200_OK,
+)
+async def update_my_privacy_settings(
+    payload: UserPrivacyUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserFullProfile:
+    """
+    Частично обновляет настройки приватности текущего пользователя.
+    """
+    update_data = payload.model_dump(exclude_unset=True)
+
+    user = await update_user_privacy_settings(
+        db,
+        user_id=current_user.id,
+        updates=update_data,
+    )
+
+    return build_full_profile_response(user)
+
+
+
+@router.patch(
+    "/me/settings",
+    response_model=UserFullProfile,
+    status_code=status.HTTP_200_OK,
+)
+async def update_my_settings(
+    payload: UserSettingsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UserFullProfile:
+    """
+    Частично обновляет settings текущего пользователя.
+    """
+    update_data: dict[str, Any] = payload.model_dump(exclude_unset=True)
+
+    user = await update_user_settings(
+        db,
+        user_id=current_user.id,
+        updates=update_data,
+    )
+
+    return build_full_profile_response(user)
 
 @router.post(
     "/me/avatar",
