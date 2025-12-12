@@ -130,6 +130,17 @@ class UserProfile(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="profile")
+    location_formatted: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    location_city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    location_state: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    location_country: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    location_postcode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    location_lat: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+    location_lon: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+
+    location_result_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    location_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
 
 
 class UserPrivacySettings(Base):

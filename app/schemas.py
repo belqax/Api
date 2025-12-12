@@ -31,6 +31,17 @@ class UserProfile(BaseModel):
     age: Optional[int] = Field(default=None, ge=0, le=120)
     about: Optional[str] = None
     location: Optional[str] = None
+    location_formatted: Optional[str] = Field(default=None, max_length=256)
+    location_city: Optional[str] = Field(default=None, max_length=128)
+    location_state: Optional[str] = Field(default=None, max_length=128)
+    location_country: Optional[str] = Field(default=None, max_length=128)
+    location_postcode: Optional[str] = Field(default=None, max_length=32)
+
+    location_lat: Optional[float] = None
+    location_lon: Optional[float] = None
+
+    location_result_type: Optional[str] = Field(default=None, max_length=64)
+    location_confidence: Optional[float] = None
     avatar_url: Optional[str] = None
 
     class Config:
@@ -89,6 +100,18 @@ class UserProfileUpdateRequest(BaseModel):
     age: Optional[int] = Field(default=None)
     about: Optional[str] = Field(default=None)
     location: Optional[str] = Field(default=None)
+    # structured
+    location_formatted: Optional[str] = Field(default=None, max_length=256)
+    location_city: Optional[str] = Field(default=None, max_length=128)
+    location_state: Optional[str] = Field(default=None, max_length=128)
+    location_country: Optional[str] = Field(default=None, max_length=128)
+    location_postcode: Optional[str] = Field(default=None, max_length=32)
+
+    location_lat: Optional[float] = Field(default=None)
+    location_lon: Optional[float] = Field(default=None)
+
+    location_result_type: Optional[str] = Field(default=None, max_length=64)
+    location_confidence: Optional[float] = Field(default=None)
 
     model_config = {
         "extra": "forbid",
