@@ -248,7 +248,6 @@ async def update_profile(
     display_name: Optional[str] = None,
     age: Optional[int] = None,
     about: Optional[str] = None,
-    location: Optional[str] = None,
 ) -> User:
     """
     Обновляет профиль пользователя по user_id.
@@ -262,18 +261,10 @@ async def update_profile(
     payload: dict[str, Any] = {
         "display_name": display_name,
         "age": age,
-        "about": about,
-        "location": location,
+        "about": about
     }
     # Оставляет только реально переданные значения (не None)
     update_fields = {k: v for k, v in payload.items() if v is not None}
-
-    logger.info(
-        "update_profile(): user_id=%s raw=%s update_fields=%s",
-        user_id,
-        payload,
-        update_fields,
-    )
 
     # Если нечего обновлять, просто возвращает актуального пользователя
     if not update_fields:
@@ -290,8 +281,6 @@ async def update_profile(
 
     if profile is None:
         # Вставляет новый профиль
-        logger.info("update_profile(): creating new profile for user_id=%s", user_id)
-
         new_profile = UserProfile(
             user_id=user_id,
             **update_fields,
@@ -300,8 +289,6 @@ async def update_profile(
         )
         db.add(new_profile)
     else:
-        # Делает явный UPDATE (без зависимости от ORM-статуса инстанса)
-        logger.info("update_profile(): updating existing profile for user_id=%s", user_id)
 
         update_fields["updated_at"] = now
 
@@ -315,18 +302,6 @@ async def update_profile(
 
     # Перегружает пользователя целиком
     user = await load_user_with_all_relations(db, user_id=user_id)
-
-    logger.info(
-        "update_profile(): saved for user_id=%s => profile=%s",
-        user_id,
-        {
-            "display_name": user.profile.display_name if user.profile else None,
-            "age": user.profile.age if user.profile else None,
-            "about": user.profile.about if user.profile else None,
-            "location": user.profile.location if user.profile else None,
-        },
-    )
-
     return user
 
 

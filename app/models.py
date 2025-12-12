@@ -119,7 +119,6 @@ class UserProfile(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(100))
     age: Mapped[Optional[int]] = mapped_column(Integer)
     about: Mapped[Optional[str]] = mapped_column(Text)
-    location: Mapped[Optional[str]] = mapped_column(String(255))
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500))
 
     created_at: Mapped[dt.datetime] = mapped_column(

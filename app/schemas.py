@@ -30,7 +30,6 @@ class UserProfile(BaseModel):
     display_name: Optional[str] = None
     age: Optional[int] = Field(default=None, ge=0, le=120)
     about: Optional[str] = None
-    location: Optional[str] = None
     location_formatted: Optional[str] = Field(default=None, max_length=256)
     location_city: Optional[str] = Field(default=None, max_length=128)
     location_state: Optional[str] = Field(default=None, max_length=128)
@@ -99,7 +98,6 @@ class UserProfileUpdateRequest(BaseModel):
     display_name: Optional[str] = Field(default=None)
     age: Optional[int] = Field(default=None)
     about: Optional[str] = Field(default=None)
-    location: Optional[str] = Field(default=None)
     # structured
     location_formatted: Optional[str] = Field(default=None, max_length=256)
     location_city: Optional[str] = Field(default=None, max_length=128)
