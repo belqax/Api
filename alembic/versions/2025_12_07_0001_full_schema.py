@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from typing import Sequence, Union
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-
-# Новый общий revision
 revision: str = "2025_12_07_0001_full_schema"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
@@ -14,18 +13,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-
     # users
     op.create_table(
         "users",
         sa.Column("id", sa.BigInteger(), primary_key=True),
-        sa.Column("phone", sa.String(length=32), nullable=False, unique=True),
+
+        sa.Column("phone", sa.String(length=32), nullable=True, unique=True),
+
         sa.Column("email", sa.String(length=255), nullable=True, unique=True),
+
         sa.Column("is_phone_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("is_email_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+
         sa.Column("hashed_password", sa.String(length=255), nullable=True),
+
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("is_superuser", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
     )
@@ -35,14 +39,30 @@ def upgrade() -> None:
     op.create_table(
         "user_profiles",
         sa.Column("user_id", sa.BigInteger(), sa.ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+
         sa.Column("display_name", sa.String(length=100), nullable=True),
         sa.Column("age", sa.Integer(), nullable=True),
         sa.Column("about", sa.Text(), nullable=True),
-        sa.Column("location", sa.String(length=255), nullable=True),
+
+        # avatar
         sa.Column("avatar_url", sa.String(length=500), nullable=True),
+
+        # structured location fields (2025_12_12_add_profile_location_fields)
+        sa.Column("location_formatted", sa.String(length=256), nullable=True),
+        sa.Column("location_city", sa.String(length=128), nullable=True),
+        sa.Column("location_state", sa.String(length=128), nullable=True),
+        sa.Column("location_country", sa.String(length=128), nullable=True),
+        sa.Column("location_postcode", sa.String(length=32), nullable=True),
+        sa.Column("location_lat", sa.Numeric(9, 6), nullable=True),
+        sa.Column("location_lon", sa.Numeric(9, 6), nullable=True),
+        sa.Column("location_result_type", sa.String(length=64), nullable=True),
+        sa.Column("location_confidence", sa.Numeric(4, 3), nullable=True),
+
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
     )
+    op.create_index("ix_user_profiles_location_city", "user_profiles", ["location_city"], unique=False)
+    op.create_index("ix_user_profiles_location_lat_lon", "user_profiles", ["location_lat", "location_lon"], unique=False)
 
     # user_privacy_settings
     op.create_table(
@@ -93,10 +113,10 @@ def upgrade() -> None:
     )
     op.create_index("idx_user_devices_user_id", "user_devices", ["user_id"], unique=False)
 
-    # user_sessions
+    # user_sessions (исправлено на BigInteger)
     op.create_table(
         "user_sessions",
-        sa.Column("id", sa.BigBigInteger(), primary_key=True),
+        sa.Column("id", sa.BigInteger(), primary_key=True),
         sa.Column("user_id", sa.BigInteger(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("device_id", sa.BigInteger(), sa.ForeignKey("user_devices.id", ondelete="SET NULL"), nullable=True),
         sa.Column("refresh_token_hash", sa.String(length=255), nullable=False),
@@ -155,12 +175,13 @@ def upgrade() -> None:
     op.create_index("idx_animals_status", "animals", ["status"], unique=False)
     op.create_index("idx_animals_species", "animals", ["species"], unique=False)
 
-    # animal_photos
+    # animal_photos (+ thumb_url)
     op.create_table(
         "animal_photos",
         sa.Column("id", sa.BigInteger(), primary_key=True),
         sa.Column("animal_id", sa.BigInteger(), sa.ForeignKey("animals.id", ondelete="CASCADE"), nullable=False),
         sa.Column("url", sa.String(length=500), nullable=False),
+        sa.Column("thumb_url", sa.String(length=500), nullable=True),
         sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -181,20 +202,92 @@ def upgrade() -> None:
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
-    op.create_index("ix_email_verification_codes_email_purpose", "email_verification_codes", ["email", "purpose"], unique=False)
+    op.create_index(
+        "ix_email_verification_codes_email_purpose",
+        "email_verification_codes",
+        ["email", "purpose"],
+        unique=False,
+    )
+
+    # animal_likes
+    op.create_table(
+        "animal_likes",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("from_user_id", sa.BigInteger(), nullable=False),
+        sa.Column("animal_id", sa.BigInteger(), nullable=False),
+        sa.Column("result", sa.String(length=16), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.ForeignKeyConstraint(["from_user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["animal_id"], ["animals.id"], ondelete="CASCADE"),
+        sa.UniqueConstraint("from_user_id", "animal_id", name="uq_animal_likes_from_user_animal"),
+    )
+    op.create_index("ix_animal_likes_from_user_id", "animal_likes", ["from_user_id"], unique=False)
+    op.create_index("ix_animal_likes_animal_id", "animal_likes", ["animal_id"], unique=False)
+
+    # user_matches
+    op.create_table(
+        "user_matches",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("user_id1", sa.BigInteger(), nullable=False),
+        sa.Column("user_id2", sa.BigInteger(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.ForeignKeyConstraint(["user_id1"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["user_id2"], ["users.id"], ondelete="CASCADE"),
+        sa.UniqueConstraint("user_id1", "user_id2", name="uq_user_matches_pair"),
+    )
+    op.create_index("ix_user_matches_user_id1", "user_matches", ["user_id1"], unique=False)
+    op.create_index("ix_user_matches_user_id2", "user_matches", ["user_id2"], unique=False)
+
+    # user_search_history
+    op.create_table(
+        "user_search_history",
+        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
+        sa.Column("user_id", sa.BigInteger(), nullable=False),
+        sa.Column("source", sa.String(length=64), nullable=False),
+        sa.Column("filters", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+    )
+    op.create_index("ix_user_search_history_user_id", "user_search_history", ["user_id"], unique=False)
 
 
 def downgrade() -> None:
+    op.drop_index("ix_user_search_history_user_id", table_name="user_search_history")
+    op.drop_table("user_search_history")
+
+    op.drop_index("ix_user_matches_user_id2", table_name="user_matches")
+    op.drop_index("ix_user_matches_user_id1", table_name="user_matches")
+    op.drop_table("user_matches")
+
+    op.drop_index("ix_animal_likes_animal_id", table_name="animal_likes")
+    op.drop_index("ix_animal_likes_from_user_id", table_name="animal_likes")
+    op.drop_table("animal_likes")
+
+    op.drop_index("ix_email_verification_codes_email_purpose", table_name="email_verification_codes")
     op.drop_table("email_verification_codes")
+
     op.drop_index("idx_animal_photos_animal_id", table_name="animal_photos")
     op.drop_table("animal_photos")
+
+    op.drop_index("idx_animals_species", table_name="animals")
+    op.drop_index("idx_animals_status", table_name="animals")
+    op.drop_index("idx_animals_owner", table_name="animals")
     op.drop_table("animals")
+
     op.drop_index("idx_user_sessions_refresh_hash", table_name="user_sessions")
     op.drop_index("idx_user_sessions_user_id", table_name="user_sessions")
     op.drop_table("user_sessions")
+
+    op.drop_index("idx_user_devices_user_id", table_name="user_devices")
     op.drop_table("user_devices")
+
     op.drop_table("user_settings")
     op.drop_table("user_privacy_settings")
+
+    op.drop_index("ix_user_profiles_location_lat_lon", table_name="user_profiles")
+    op.drop_index("ix_user_profiles_location_city", table_name="user_profiles")
     op.drop_table("user_profiles")
+
     op.drop_index("ix_users_phone", table_name="users")
     op.drop_table("users")
