@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 10
     refresh_token_expire_days: int = 30
 
     # Верификация e-mail
