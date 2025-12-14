@@ -24,7 +24,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user_id: int) -> str:
     now = dt.datetime.now(dt.timezone.utc)
-    expires = now + dt.timedelta(minutes=15)
+    expires = now + dt.timedelta(minutes=settings.access_token_expire_minutes)
     payload: Dict[str, Any] = {
         "sub": str(user_id),
         "iat": int(now.timestamp()),
@@ -35,7 +35,7 @@ def create_access_token(user_id: int) -> str:
 
 
 def create_refresh_token() -> str:
-    return secrets.token_urlsafe(48)
+    return secrets.token_urlsafe(96)
 
 
 def hash_refresh_token(token: str) -> str:
