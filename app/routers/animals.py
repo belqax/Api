@@ -11,11 +11,11 @@ from fastapi import (
     status,
     Query
 )
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from ..deps import get_db, get_current_user
-from ..models import User, Animal
+from ..models import User, Animal, AnimalLike
 from ..repositories.matching_repository import create_or_update_like, detect_mutual_like_and_create_match
 from ..repositories.search_history_repository import log_user_search
 from ..schemas import (
@@ -442,3 +442,25 @@ async def dislike_animal(
         match_user_id=None,
         match_id=None,
     )
+
+
+@router.delete(
+    "/dev/likes",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def dev_delete_all_likes_and_dislikes(
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    DEV-ONLY: удаляет все лайки/дизлайки.
+
+    Без авторизации пользователя, но с обязательной защитой:
+      - APP_ENV должен быть 'dev'
+      - DEV_DANGEROUS_TOKEN должен быть задан
+      - token (query) должен совпасть с DEV_DANGEROUS_TOKEN
+      - (опционально) только localhost/локальная сеть
+    """
+
+    # ВАЖНО: AnimalLike заменить на фактическую ORM-модель таблицы реакций
+    await db.execute(delete(AnimalLike))
+    await db.commit()

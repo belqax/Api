@@ -20,7 +20,7 @@ app = FastAPI(
 
 app.mount(
     "/media",
-    StaticFiles(directory=MEDIA_ROOT),
+    StaticFiles(directory=settings.media_root),
     name="media",
 )
 
