@@ -57,7 +57,6 @@ async def _read_upload_limited(upload: UploadFile, max_bytes: int) -> bytes:
 def _open_image_safely(raw_bytes: bytes) -> Image.Image:
     try:
         img = Image.open(BytesIO(raw_bytes))
-        # нормализует ориентацию по EXIF (часто у фото с телефона)
         img = ImageOps.exif_transpose(img)
         img.load()
         return img
@@ -69,15 +68,6 @@ def _open_image_safely(raw_bytes: bytes) -> Image.Image:
         ) from exc
 
 
-def _needs_alpha(img: Image.Image) -> bool:
-    # PNG/WEBP могут иметь альфу; JPEG — нет.
-    if img.mode in ("RGBA", "LA"):
-        return True
-    if img.mode == "P":
-        return "transparency" in img.info
-    return False
-
-
 def _resize_keep_aspect(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
     out = img.copy()
     out.thumbnail((max_w, max_h), Image.LANCZOS)
@@ -85,73 +75,20 @@ def _resize_keep_aspect(img: Image.Image, max_w: int, max_h: int) -> Image.Image
 
 
 def _make_thumb(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
-    # Миниатюра: 1) сохраняет пропорции (thumbnail)
-    # Если нужен квадрат — замени на ImageOps.fit(..., (max_w, max_h), ...)
     thumb = img.copy()
     thumb.thumbnail((max_w, max_h), Image.LANCZOS)
     return thumb
 
 
-def _encode_main_image(
-    img: Image.Image,
-    content_type: str,
-) -> tuple[bytes, str]:
-    """
-    Возвращает (bytes, ext) для основного файла.
-
-    Политика:
-    - если есть альфа (прозрачность) -> PNG без потерь (optimize, compress_level)
-    - иначе:
-      - JPEG (quality высокий, progressive, optimize)
-      - WEBP если оригинал WEBP (или если хочешь принудительно WEBP) — тоже ок
-    """
-    max_w = _settings.animal_photo_max_width
-    max_h = _settings.animal_photo_max_height
-    resized = _resize_keep_aspect(img, max_w, max_h)
-
-    has_alpha = _needs_alpha(resized)
-
-    # Важное: не конвертирует в RGB без необходимости, чтобы не потерять альфу.
-    if has_alpha:
-        # PNG без потерь
-        png = resized.convert("RGBA") if resized.mode != "RGBA" else resized
-        buf = BytesIO()
-        png.save(
-            buf,
-            format="PNG",
-            optimize=True,
-            compress_level=9,  # 0..9; 9 = максимальная компрессия (медленнее)
-        )
-        return buf.getvalue(), ".png"
-
-    # Без альфы -> JPEG или WEBP
-    # JPEG обычно самый совместимый и предсказуемый по весу.
-    rgb = resized.convert("RGB")
-
-    # Можно сохранять WEBP для ещё меньшего размера при близком качестве,
-    # но это зависит от требований клиента. Сейчас: сохраняет WEBP только если загрузили WEBP.
-    if content_type == "image/webp":
-        buf = BytesIO()
-        rgb.save(
-            buf,
-            format="WEBP",
-            quality=max(92, int(_settings.animal_photo_quality)),  # держит качество высоким
-            method=6,  # 0..6 (6 лучше, медленнее)
-        )
-        return buf.getvalue(), ".webp"
-
-    # JPEG: quality высокий + optimize + progressive -> обычно меньше без заметной потери
-    jpeg_quality = max(92, int(_settings.animal_photo_quality))
-    buf = BytesIO()
-    rgb.save(
-        buf,
-        format="JPEG",
-        quality=jpeg_quality,
-        optimize=True,
-        progressive=True,
-        subsampling=0,  # максимально “чисто”, но размер может вырасти; см. примечание ниже
-    )
-    return buf.getvalue(), ".jpg"
+def _guess_extension_from_content_type(content_type: str) -> str:
+    ct = (content_type or "").lower()
+    if ct in ("image/jpeg", "image/jpg"):
+        return ".jpg"
+    if ct == "image/png":
+        return ".png"
+    if ct == "image/webp":
+        return ".webp"
+    return ".jpg"
 
 
 def _encode_thumb_image(
@@ -161,9 +98,7 @@ def _encode_thumb_image(
     """
     Возвращает (bytes, ext) для миниатюры.
 
-    Политика:
-    - всегда превращает в RGB (thumb обычно без альфы)
-    - сохраняет в JPEG или WEBP
+    Thumb остаётся миниатюрой: отдельный ресайз и умеренное качество.
     """
     max_w = _settings.animal_thumb_max_width
     max_h = _settings.animal_thumb_max_height
@@ -171,7 +106,6 @@ def _encode_thumb_image(
     thumb = _make_thumb(img, max_w, max_h)
     rgb = thumb.convert("RGB")
 
-    # thumb можно сохранять WEBP если исходник webp, иначе JPEG
     if content_type == "image/webp":
         buf = BytesIO()
         rgb.save(
@@ -202,12 +136,8 @@ async def save_animal_photo_file(
     Сохраняет фото животного и миниатюру.
     Возвращает (url, thumb_url).
 
-    Основник:
-    - PNG без потерь при наличии альфы
-    - иначе JPEG (high quality + progressive + optimize) или WEBP если залили WEBP
-
-    Thumb:
-    - отдельный ресайз до 400x400 (по конфигу) и JPEG/WEBP
+    ВАЖНО: основной файл сохраняется БЕЗ перекодирования/сжатия (raw bytes as-is).
+    Thumb генерируется отдельно как миниатюра.
     """
     _ensure_media_dirs_exist()
 
@@ -220,6 +150,7 @@ async def save_animal_photo_file(
 
     raw_bytes = await _read_upload_limited(upload, _settings.animal_photo_max_bytes)
 
+    # Проверяет, что это изображение (и одновременно нормализует ориентацию для thumb)
     img = _open_image_safely(raw_bytes)
 
     base_dir = (
@@ -232,20 +163,18 @@ async def save_animal_photo_file(
 
     base_name = uuid4().hex
 
-    main_bytes, main_ext = _encode_main_image(img, content_type)
-    thumb_bytes, thumb_ext = _encode_thumb_image(img, content_type)
-
-    # Делает расширения одинаковыми для пары (удобнее)
-    # Если main PNG (альфа) — thumb всё равно JPG, но можно сделать PNG (обычно не нужно).
-    # Здесь оставляется как есть: main_ext и thumb_ext могут отличаться.
+    # Основной файл: сохраняется как есть
+    main_ext = _guess_extension_from_content_type(content_type)
     main_filename = f"{base_name}{main_ext}"
-    thumb_filename = f"{base_name}_thumb{thumb_ext}"
-
     main_path = base_dir / main_filename
-    thumb_path = base_dir / thumb_filename
 
     async with aiofiles.open(main_path, "wb") as f:
-        await f.write(main_bytes)
+        await f.write(raw_bytes)
+
+    # Миниатюра: отдельный файл
+    thumb_bytes, thumb_ext = _encode_thumb_image(img, content_type)
+    thumb_filename = f"{base_name}_thumb{thumb_ext}"
+    thumb_path = base_dir / thumb_filename
 
     async with aiofiles.open(thumb_path, "wb") as f:
         await f.write(thumb_bytes)
@@ -273,6 +202,8 @@ async def save_user_avatar_file(
 ) -> str:
     """
     Сохраняет аватар пользователя, возвращает публичный URL.
+
+    Оставлено как было: аватар обычно допустимо ресайзить и перекодировать.
     """
     content_type = (file.content_type or "").lower()
     if content_type not in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
@@ -296,16 +227,39 @@ async def save_user_avatar_file(
 
     base_name = uuid4().hex
 
-    # Для аватарки: если есть альфа — PNG, иначе JPEG (или WEBP если залили WEBP)
-    if _needs_alpha(img) and content_type == "image/png":
+    # Минимально сохраняет совместимость: если PNG — PNG, если WEBP — WEBP, иначе JPEG
+    if content_type == "image/png":
         filename = f"{base_name}.png"
-        out_bytes, _ = _encode_main_image(img, "image/png")  # вернёт PNG
+        save_format = "PNG"
+        out_img = img.convert("RGBA") if img.mode != "RGBA" else img
+        buf = BytesIO()
+        out_img.save(buf, format=save_format, optimize=True, compress_level=9)
+        out_bytes = buf.getvalue()
     elif content_type == "image/webp":
         filename = f"{base_name}.webp"
-        out_bytes, _ = _encode_main_image(img, "image/webp")
+        save_format = "WEBP"
+        out_img = img.convert("RGB")
+        buf = BytesIO()
+        out_img.save(
+            buf,
+            format=save_format,
+            quality=int(_settings.animal_photo_quality),
+            method=6,
+        )
+        out_bytes = buf.getvalue()
     else:
         filename = f"{base_name}.jpg"
-        out_bytes, _ = _encode_main_image(img, "image/jpeg")
+        save_format = "JPEG"
+        out_img = img.convert("RGB")
+        buf = BytesIO()
+        out_img.save(
+            buf,
+            format=save_format,
+            quality=int(_settings.animal_photo_quality),
+            optimize=True,
+            progressive=True,
+        )
+        out_bytes = buf.getvalue()
 
     file_path = user_dir / filename
     async with aiofiles.open(file_path, "wb") as out:
